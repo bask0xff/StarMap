@@ -1,6 +1,5 @@
 package com.bask0xff.starmap
 
-
 import android.content.Context
 import android.hardware.Sensor
 import android.hardware.SensorEvent
@@ -63,6 +62,8 @@ class MainActivity : ComponentActivity(), SensorEventListener {
         private lateinit var starBuffer: FloatBuffer
         private lateinit var axesBuffer: FloatBuffer
         private lateinit var axesColorBuffer: FloatBuffer
+        private lateinit var sensorAxesBuffer: FloatBuffer
+        private lateinit var sensorAxesColorBuffer: FloatBuffer
         private val projectionMatrix = FloatArray(16)
         private val viewMatrix = FloatArray(16)
         private var starProgram: Int = 0
@@ -70,26 +71,36 @@ class MainActivity : ComponentActivity(), SensorEventListener {
         private val starCount = 100
         private val starPositions = FloatArray(starCount * 3)
         private val axesVertices = floatArrayOf(
-            // X-axis (red)
-            0f, 0f, 0f, // Start
-            1f, 0f, 0f, // End
-            // Y-axis (green)
-            0f, 0f, 0f, // Start
-            0f, 1f, 0f, // End
-            // Z-axis (blue)
-            0f, 0f, 0f, // Start
-            0f, 0f, 1f  // End
+            // OpenGL X-axis (red)
+            0f, 0f, 0f, 1f, 0f, 0f,
+            // OpenGL Y-axis (green)
+            0f, 0f, 0f, 0f, 1f, 0f,
+            // OpenGL Z-axis (blue)
+            0f, 0f, 0f, 0f, 0f, 1f
         )
         private val axesColors = floatArrayOf(
-            // X-axis (red)
-            1f, 0f, 0f, 1f, // Start
-            1f, 0f, 0f, 1f, // End
-            // Y-axis (green)
-            0f, 1f, 0f, 1f, // Start
-            0f, 1f, 0f, 1f, // End
-            // Z-axis (blue)
-            0f, 0f, 1f, 1f, // Start
-            0f, 0f, 1f, 1f  // End
+            // OpenGL X-axis (red)
+            1f, 0f, 0f, 1f, 1f, 0f, 0f, 1f,
+            // OpenGL Y-axis (green)
+            0f, 1f, 0f, 1f, 0f, 1f, 0f, 1f,
+            // OpenGL Z-axis (blue)
+            0f, 0f, 1f, 1f, 0f, 0f, 1f, 1f
+        )
+        private val sensorAxesVertices = floatArrayOf(
+            // Sensor X-axis (pink)
+            0f, 0f, 0f, -1f, 0f, 0f,
+            // Sensor Y-axis (cyan)
+            0f, 0f, 0f, 0f, -1f, 0f,
+            // Sensor Z-axis (yellow)
+            0f, 0f, 0f, 0f, 0f, -1f
+        )
+        private val sensorAxesColors = floatArrayOf(
+            // Sensor X-axis (pink)
+            1f, 0f, 1f, 1f, 1f, 0f, 1f, 1f,
+            // Sensor Y-axis (cyan)
+            0f, 1f, 1f, 1f, 0f, 1f, 1f, 1f,
+            // Sensor Z-axis (yellow)
+            1f, 1f, 0f, 1f, 1f, 1f, 0f, 1f
         )
 
         override fun onSurfaceCreated(gl: GL10?, config: EGLConfig?) {
@@ -106,7 +117,7 @@ class MainActivity : ComponentActivity(), SensorEventListener {
                     position(0)
                 }
 
-            // Axes
+            // OpenGL axes
             axesBuffer = ByteBuffer.allocateDirect(axesVertices.size * 4)
                 .order(ByteOrder.nativeOrder())
                 .asFloatBuffer()
@@ -119,6 +130,22 @@ class MainActivity : ComponentActivity(), SensorEventListener {
                 .asFloatBuffer()
                 .apply {
                     put(axesColors)
+                    position(0)
+                }
+
+            // Sensor axes
+            sensorAxesBuffer = ByteBuffer.allocateDirect(sensorAxesVertices.size * 4)
+                .order(ByteOrder.nativeOrder())
+                .asFloatBuffer()
+                .apply {
+                    put(sensorAxesVertices)
+                    position(0)
+                }
+            sensorAxesColorBuffer = ByteBuffer.allocateDirect(sensorAxesColors.size * 4)
+                .order(ByteOrder.nativeOrder())
+                .asFloatBuffer()
+                .apply {
+                    put(sensorAxesColors)
                     position(0)
                 }
 
@@ -147,9 +174,7 @@ class MainActivity : ComponentActivity(), SensorEventListener {
             GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT)
             checkGLError("Clear")
 
-            // Draw stars
-            GLES20.glUseProgram(starProgram)
-            checkGLError("UseStarProgram")
+            // Update orientation
             updateOrientation()
             val modelMatrix = FloatArray(16)
             Matrix.setIdentityM(modelMatrix, 0)
@@ -157,6 +182,9 @@ class MainActivity : ComponentActivity(), SensorEventListener {
             Matrix.multiplyMM(mvpMatrix, 0, projectionMatrix, 0, viewMatrix, 0)
             Matrix.multiplyMM(mvpMatrix, 0, mvpMatrix, 0, remappedRotationMatrix, 0)
 
+            // Draw stars
+            GLES20.glUseProgram(starProgram)
+            checkGLError("UseStarProgram")
             val starMvpMatrixHandle = GLES20.glGetUniformLocation(starProgram, "uMVPMatrix")
             GLES20.glUniformMatrix4fv(starMvpMatrixHandle, 1, false, mvpMatrix, 0)
             checkGLError("StarSetMatrix")
@@ -172,15 +200,15 @@ class MainActivity : ComponentActivity(), SensorEventListener {
             GLES20.glDisableVertexAttribArray(starPositionHandle)
             checkGLError("StarDisableVertexAttrib")
 
-            // Draw axes
+            // Draw OpenGL axes
             GLES20.glUseProgram(axesProgram)
             checkGLError("UseAxesProgram")
             val axesMvpMatrixHandle = GLES20.glGetUniformLocation(axesProgram, "uMVPMatrix")
             GLES20.glUniformMatrix4fv(axesMvpMatrixHandle, 1, false, mvpMatrix, 0)
             checkGLError("AxesSetMatrix")
 
-            val axesPositionHandle = GLES20.glGetAttribLocation(axesProgram, "aPosition")
-            val axesColorHandle = GLES20.glGetAttribLocation(axesProgram, "aColor")
+            var axesPositionHandle = GLES20.glGetAttribLocation(axesProgram, "aPosition")
+            var axesColorHandle = GLES20.glGetAttribLocation(axesProgram, "aColor")
             GLES20.glEnableVertexAttribArray(axesPositionHandle)
             GLES20.glEnableVertexAttribArray(axesColorHandle)
             checkGLError("AxesEnableVertexAttrib")
@@ -198,6 +226,35 @@ class MainActivity : ComponentActivity(), SensorEventListener {
             GLES20.glDisableVertexAttribArray(axesPositionHandle)
             GLES20.glDisableVertexAttribArray(axesColorHandle)
             checkGLError("AxesDisableVertexAttrib")
+
+            // Draw sensor axes
+            GLES20.glUseProgram(axesProgram)
+            checkGLError("UseSensorAxesProgram")
+            val sensorMvpMatrix = FloatArray(16)
+            Matrix.multiplyMM(sensorMvpMatrix, 0, projectionMatrix, 0, viewMatrix, 0)
+            Matrix.multiplyMM(sensorMvpMatrix, 0, sensorMvpMatrix, 0, rotationMatrix, 0)
+            GLES20.glUniformMatrix4fv(axesMvpMatrixHandle, 1, false, sensorMvpMatrix, 0)
+            checkGLError("SensorAxesSetMatrix")
+
+            axesPositionHandle = GLES20.glGetAttribLocation(axesProgram, "aPosition")
+            axesColorHandle = GLES20.glGetAttribLocation(axesProgram, "aColor")
+            GLES20.glEnableVertexAttribArray(axesPositionHandle)
+            GLES20.glEnableVertexAttribArray(axesColorHandle)
+            checkGLError("SensorAxesEnableVertexAttrib")
+
+            sensorAxesBuffer.position(0)
+            GLES20.glVertexAttribPointer(axesPositionHandle, 3, GLES20.GL_FLOAT, false, 0, sensorAxesBuffer)
+            checkGLError("SensorAxesVertexAttribPointer")
+            sensorAxesColorBuffer.position(0)
+            GLES20.glVertexAttribPointer(axesColorHandle, 4, GLES20.GL_FLOAT, false, 0, sensorAxesColorBuffer)
+            checkGLError("SensorAxesColorAttribPointer")
+
+            GLES20.glLineWidth(3f)
+            GLES20.glDrawArrays(GLES20.GL_LINES, 0, 6)
+            checkGLError("SensorAxesDrawArrays")
+            GLES20.glDisableVertexAttribArray(axesPositionHandle)
+            GLES20.glDisableVertexAttribArray(axesColorHandle)
+            checkGLError("SensorAxesDisableVertexAttrib")
         }
 
         override fun onSurfaceChanged(gl: GL10?, width: Int, height: Int) {
