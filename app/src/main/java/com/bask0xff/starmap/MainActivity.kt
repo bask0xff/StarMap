@@ -1,5 +1,6 @@
 package com.bask0xff.starmap
 
+
 import android.content.Context
 import android.hardware.Sensor
 import android.hardware.SensorEvent
@@ -88,11 +89,11 @@ class MainActivity : ComponentActivity(), SensorEventListener {
         )
         private val sensorAxesVertices = floatArrayOf(
             // Sensor X-axis (pink)
-            0f, 0f, 0f, -1f, 0f, 0f,
+            0f, 0f, 0f, -0.5f, 0f, 0f,
             // Sensor Y-axis (cyan)
-            0f, 0f, 0f, 0f, -1f, 0f,
+            0f, 0f, 0f, 0f, -0.5f, 0f,
             // Sensor Z-axis (yellow)
-            0f, 0f, 0f, 0f, 0f, -1f
+            0f, 0f, 0f, 0f, 0f, -0.5f
         )
         private val sensorAxesColors = floatArrayOf(
             // Sensor X-axis (pink)
