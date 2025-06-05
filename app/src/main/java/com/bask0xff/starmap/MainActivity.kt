@@ -60,16 +60,29 @@ class MainActivity : ComponentActivity(), SensorEventListener {
 
     inner class StarRenderer : GLSurfaceView.Renderer {
         private lateinit var starBuffer: FloatBuffer
+        private lateinit var axesBuffer: FloatBuffer
         private val projectionMatrix = FloatArray(16)
         private val viewMatrix = FloatArray(16)
-        private var program: Int = 0
+        private var starProgram: Int = 0
+        private var axesProgram: Int = 0
         private val starCount = 100
         private val starPositions = FloatArray(starCount * 3)
+        private val axesVertices = floatArrayOf(
+            0f, 0f, 0f, 1f, 0f, 0f, // X-axis (red)
+            0f, 0f, 0f, 0f, 1f, 0f, // Y-axis (green)
+            0f, 0f, 0f, 0f, 0f, 1f  // Z-axis (blue)
+        )
+        private val axesColors = floatArrayOf(
+            1f, 0f, 0f, 1f, // Red for X
+            0f, 1f, 0f, 1f, // Green for Y
+            0f, 0f, 1f, 1f  // Blue for Z
+        )
 
         override fun onSurfaceCreated(gl: GL10?, config: EGLConfig?) {
             GLES20.glClearColor(0.0f, 0.0f, 0.2f, 1.0f)
             checkGLError("ClearColor")
 
+            // Stars
             generateStars()
             starBuffer = ByteBuffer.allocateDirect(starPositions.size * 4)
                 .order(ByteOrder.nativeOrder())
@@ -79,26 +92,43 @@ class MainActivity : ComponentActivity(), SensorEventListener {
                     position(0)
                 }
 
-            val vertexShader = loadShader(GLES20.GL_VERTEX_SHADER, vertexShaderCode)
-            checkGLError("VertexShaderCompile")
-            val fragmentShader = loadShader(GLES20.GL_FRAGMENT_SHADER, fragmentShaderCode)
-            checkGLError("FragmentShaderCompile")
+            // Axes
+            axesBuffer = ByteBuffer.allocateDirect(axesVertices.size * 4)
+                .order(ByteOrder.nativeOrder())
+                .asFloatBuffer()
+                .apply {
+                    put(axesVertices)
+                    position(0)
+                }
 
-            program = GLES20.glCreateProgram().also {
-                GLES20.glAttachShader(it, vertexShader)
-                GLES20.glAttachShader(it, fragmentShader)
+            // Star program
+            val starVertexShader = loadShader(GLES20.GL_VERTEX_SHADER, starVertexShaderCode)
+            val starFragmentShader = loadShader(GLES20.GL_FRAGMENT_SHADER, starFragmentShaderCode)
+            starProgram = GLES20.glCreateProgram().also {
+                GLES20.glAttachShader(it, starVertexShader)
+                GLES20.glAttachShader(it, starFragmentShader)
                 GLES20.glLinkProgram(it)
             }
-            checkGLError("ProgramLink")
+            checkGLError("StarProgramLink")
+
+            // Axes program
+            val axesVertexShader = loadShader(GLES20.GL_VERTEX_SHADER, axesVertexShaderCode)
+            val axesFragmentShader = loadShader(GLES20.GL_FRAGMENT_SHADER, axesFragmentShaderCode)
+            axesProgram = GLES20.glCreateProgram().also {
+                GLES20.glAttachShader(it, axesVertexShader)
+                GLES20.glAttachShader(it, axesFragmentShader)
+                GLES20.glLinkProgram(it)
+            }
+            checkGLError("AxesProgramLink")
         }
 
         override fun onDrawFrame(gl: GL10?) {
             GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT)
             checkGLError("Clear")
 
-            GLES20.glUseProgram(program)
-            checkGLError("UseProgram")
-
+            // Draw stars
+            GLES20.glUseProgram(starProgram)
+            checkGLError("UseStarProgram")
             updateOrientation()
             val modelMatrix = FloatArray(16)
             Matrix.setIdentityM(modelMatrix, 0)
@@ -106,23 +136,53 @@ class MainActivity : ComponentActivity(), SensorEventListener {
             Matrix.multiplyMM(mvpMatrix, 0, projectionMatrix, 0, viewMatrix, 0)
             Matrix.multiplyMM(mvpMatrix, 0, mvpMatrix, 0, remappedRotationMatrix, 0)
 
-            val mvpMatrixHandle = GLES20.glGetUniformLocation(program, "uMVPMatrix")
-            GLES20.glUniformMatrix4fv(mvpMatrixHandle, 1, false, mvpMatrix, 0)
-            checkGLError("SetMatrix")
+            val starMvpMatrixHandle = GLES20.glGetUniformLocation(starProgram, "uMVPMatrix")
+            GLES20.glUniformMatrix4fv(starMvpMatrixHandle, 1, false, mvpMatrix, 0)
+            checkGLError("StarSetMatrix")
 
-            val positionHandle = GLES20.glGetAttribLocation(program, "aPosition")
-            if (positionHandle == -1) {
-                return
-            }
-            GLES20.glEnableVertexAttribArray(positionHandle)
-            checkGLError("EnableVertexAttrib")
+            val starPositionHandle = GLES20.glGetAttribLocation(starProgram, "aPosition")
+            GLES20.glEnableVertexAttribArray(starPositionHandle)
+            checkGLError("StarEnableVertexAttrib")
             starBuffer.position(0)
-            GLES20.glVertexAttribPointer(positionHandle, 3, GLES20.GL_FLOAT, false, 12, starBuffer)
-            checkGLError("VertexAttribPointer")
+            GLES20.glVertexAttribPointer(starPositionHandle, 3, GLES20.GL_FLOAT, false, 12, starBuffer)
+            checkGLError("StarVertexAttribPointer")
             GLES20.glDrawArrays(GLES20.GL_POINTS, 0, starCount)
-            checkGLError("DrawArrays")
-            GLES20.glDisableVertexAttribArray(positionHandle)
-            checkGLError("DisableVertexAttrib")
+            checkGLError("StarDrawArrays")
+            GLES20.glDisableVertexAttribArray(starPositionHandle)
+            checkGLError("StarDisableVertexAttrib")
+
+            // Draw axes
+            GLES20.glUseProgram(axesProgram)
+            checkGLError("UseAxesProgram")
+            val axesMvpMatrixHandle = GLES20.glGetUniformLocation(axesProgram, "uMVPMatrix")
+            GLES20.glUniformMatrix4fv(axesMvpMatrixHandle, 1, false, mvpMatrix, 0)
+            checkGLError("AxesSetMatrix")
+
+            val axesPositionHandle = GLES20.glGetAttribLocation(axesProgram, "aPosition")
+            val axesColorHandle = GLES20.glGetAttribLocation(axesProgram, "aColor")
+            GLES20.glEnableVertexAttribArray(axesPositionHandle)
+            GLES20.glEnableVertexAttribArray(axesColorHandle)
+            checkGLError("AxesEnableVertexAttrib")
+
+            axesBuffer.position(0)
+            GLES20.glVertexAttribPointer(axesPositionHandle, 3, GLES20.GL_FLOAT, false, 0, axesBuffer)
+            checkGLError("AxesVertexAttribPointer")
+            val colorBuffer = ByteBuffer.allocateDirect(axesColors.size * 4)
+                .order(ByteOrder.nativeOrder())
+                .asFloatBuffer()
+                .apply {
+                    put(axesColors)
+                    position(0)
+                }
+            GLES20.glVertexAttribPointer(axesColorHandle, 4, GLES20.GL_FLOAT, false, 0, colorBuffer)
+            checkGLError("AxesColorAttribPointer")
+
+            GLES20.glLineWidth(5f)
+            GLES20.glDrawArrays(GLES20.GL_LINES, 0, 6)
+            checkGLError("AxesDrawArrays")
+            GLES20.glDisableVertexAttribArray(axesPositionHandle)
+            GLES20.glDisableVertexAttribArray(axesColorHandle)
+            checkGLError("AxesDisableVertexAttrib")
         }
 
         override fun onSurfaceChanged(gl: GL10?, width: Int, height: Int) {
@@ -227,7 +287,7 @@ class MainActivity : ComponentActivity(), SensorEventListener {
         }
     }
 
-    private val vertexShaderCode = """
+    private val starVertexShaderCode = """
         attribute vec4 aPosition;
         uniform mat4 uMVPMatrix;
         void main() {
@@ -236,10 +296,29 @@ class MainActivity : ComponentActivity(), SensorEventListener {
         }
     """.trimIndent()
 
-    private val fragmentShaderCode = """
+    private val starFragmentShaderCode = """
         precision mediump float;
         void main() {
             gl_FragColor = vec4(1.0, 1.0, 1.0, 1.0);
+        }
+    """.trimIndent()
+
+    private val axesVertexShaderCode = """
+        attribute vec4 aPosition;
+        attribute vec4 aColor;
+        uniform mat4 uMVPMatrix;
+        varying vec4 vColor;
+        void main() {
+            gl_Position = uMVPMatrix * aPosition;
+            vColor = aColor;
+        }
+    """.trimIndent()
+
+    private val axesFragmentShaderCode = """
+        precision mediump float;
+        varying vec4 vColor;
+        void main() {
+            gl_FragColor = vColor;
         }
     """.trimIndent()
 }
