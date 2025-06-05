@@ -31,12 +31,11 @@ class MainActivity : ComponentActivity(), SensorEventListener {
     private var accelerometerReading = FloatArray(3)
     private var magnetometerReading = FloatArray(3)
     private var rotationMatrix = FloatArray(16)
-    private var quaternion = FloatArray(4)
+    private var lastQuaternion = FloatArray(4)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         sensorManager = getSystemService(Context.SENSOR_SERVICE) as SensorManager
-        // Проверка наличия сенсоров
         val accelerometer = sensorManager.getDefaultSensor(Sensor.TYPE_ACCELEROMETER)
         val magnetometer = sensorManager.getDefaultSensor(Sensor.TYPE_MAGNETIC_FIELD)
         Log.d("StarMap", "Accelerometer available: ${accelerometer != null}")
@@ -69,10 +68,9 @@ class MainActivity : ComponentActivity(), SensorEventListener {
 
         override fun onSurfaceCreated(gl: GL10?, config: EGLConfig?) {
             Log.d("StarMap", "Surface created")
-            GLES20.glClearColor(0.0f, 0.0f, 0.2f, 1.0f) // Тёмно-синий фон
+            GLES20.glClearColor(0.0f, 0.0f, 0.2f, 1.0f)
             checkGLError("ClearColor")
 
-            // Генерация звёзд
             generateStars()
             starBuffer = ByteBuffer.allocateDirect(starPositions.size * 4)
                 .order(ByteOrder.nativeOrder())
@@ -83,7 +81,6 @@ class MainActivity : ComponentActivity(), SensorEventListener {
                 }
             Log.d("StarMap", "Stars generated: ${starPositions.size / 3} stars")
 
-            // Загрузка шейдеров
             val vertexShader = loadShader(GLES20.GL_VERTEX_SHADER, vertexShaderCode)
             checkGLError("VertexShaderCompile")
             val fragmentShader = loadShader(GLES20.GL_FRAGMENT_SHADER, fragmentShaderCode)
@@ -117,14 +114,12 @@ class MainActivity : ComponentActivity(), SensorEventListener {
             Matrix.setIdentityM(modelMatrix, 0)
             val mvpMatrix = FloatArray(16)
             Matrix.multiplyMM(mvpMatrix, 0, projectionMatrix, 0, viewMatrix, 0)
-            Matrix.multiplyMM(mvpMatrix, 0, mvpMatrix, 0, modelMatrix, 0)
-            Matrix.multiplyMM(mvpMatrix, 0, mvpMatrix, 0, rotationMatrix, 0) // Применение ориентации
+            Matrix.multiplyMM(mvpMatrix, 0, mvpMatrix, 0, rotationMatrix, 0) // Применяем ориентацию
 
             val mvpMatrixHandle = GLES20.glGetUniformLocation(program, "uMVPMatrix")
             GLES20.glUniformMatrix4fv(mvpMatrixHandle, 1, false, mvpMatrix, 0)
             checkGLError("SetMatrix")
 
-            // Отрисовка звёзд
             val positionHandle = GLES20.glGetAttribLocation(program, "aPosition")
             if (positionHandle == -1) {
                 Log.e("StarMap", "Could not get attribute location for aPosition")
@@ -158,72 +153,92 @@ class MainActivity : ComponentActivity(), SensorEventListener {
                 starPositions[i * 3] = radius * sin(phi) * cos(theta)
                 starPositions[i * 3 + 1] = radius * sin(phi) * sin(theta)
                 starPositions[i * 3 + 2] = radius * cos(phi)
-                Log.d("StarMap", "Star $i: (${starPositions[i * 3]}, ${starPositions[i * 3 + 1]}, ${starPositions[i * 3 + 2]})")
             }
+            Log.d("StarMap", "First star: (${starPositions[0]}, ${starPositions[1]}, ${starPositions[2]})")
         }
+    }
 
-        private fun updateOrientation() {
-            val success = SensorManager.getRotationMatrix(rotationMatrix, null, accelerometerReading, magnetometerReading)
-            if (success) {
-                val q = quaternionFromRotationMatrix(rotationMatrix)
-                quaternion[0] = q[0]
-                quaternion[1] = q[1]
-                quaternion[2] = q[2]
-                quaternion[3] = q[3]
+    private fun updateOrientation() {
+        val success = SensorManager.getRotationMatrix(rotationMatrix, null, accelerometerReading, magnetometerReading)
+        if (success) {
+            // Преобразование матрицы в кватернион
+            val q = quaternionFromRotationMatrix(rotationMatrix)
+            // Проверка изменения ориентации
+            if (isQuaternionChanged(q, lastQuaternion, 0.01f)) {
+                lastQuaternion = q.copyOf()
                 Matrix.setIdentityM(rotationMatrix, 0)
-                Matrix.rotateM(rotationMatrix, 0, quaternion[0], quaternion[1], quaternion[2], quaternion[3])
-                Log.d("StarMap", "Orientation updated: Quaternion=${quaternion.joinToString()}")
-            } else {
-                Log.w("StarMap", "Failed to get rotation matrix")
-                Matrix.setIdentityM(rotationMatrix, 0) // Сброс матрицы при неудаче
+                // Применяем кватернион как вращение (переводим в градусы для OpenGL)
+                val angle = 2 * Math.acos(q[0].toDouble()).toFloat() * 180f / Math.PI.toFloat()
+                val axisX = q[1]
+                val axisY = q[2]
+                val axisZ = q[3]
+                Matrix.rotateM(rotationMatrix, 0, angle, axisX, axisY, axisZ)
+                Log.d("StarMap", "Orientation updated: Angle=$angle, Axis=($axisX, $axisY, $axisZ)")
             }
+        } else {
+            Log.w("StarMap", "Failed to get rotation matrix")
+            Matrix.setIdentityM(rotationMatrix, 0)
         }
+    }
 
-        private fun quaternionFromRotationMatrix(matrix: FloatArray): FloatArray {
-            val trace = matrix[0] + matrix[5] + matrix[10]
-            val q = FloatArray(4)
-            if (trace > 0) {
-                val s = 0.5f / kotlin.math.sqrt(trace + 1.0f)
-                q[0] = 0.25f / s
-                q[1] = (matrix[6] - matrix[9]) * s
-                q[2] = (matrix[8] - matrix[2]) * s
-                q[3] = (matrix[1] - matrix[4]) * s
+    private fun isQuaternionChanged(q1: FloatArray, q2: FloatArray, threshold: Float): Boolean {
+        val dot = q1[0] * q2[0] + q1[1] * q2[1] + q1[2] * q2[2] + q1[3] * q2[3]
+        return dot < 1 - threshold
+    }
+
+    private fun quaternionFromRotationMatrix(matrix: FloatArray): FloatArray {
+        val trace = matrix[0] + matrix[5] + matrix[10]
+        val q = FloatArray(4)
+        if (trace > 0) {
+            val s = 0.5f / kotlin.math.sqrt(trace + 1.0f)
+            q[0] = 0.25f / s
+            q[1] = (matrix[6] - matrix[9]) * s
+            q[2] = (matrix[8] - matrix[2]) * s
+            q[3] = (matrix[1] - matrix[4]) * s
+        } else {
+            if (matrix[0] > matrix[5] && matrix[0] > matrix[10]) {
+                val s = 2.0f * kotlin.math.sqrt(1.0f + matrix[0] - matrix[5] - matrix[10])
+                q[0] = (matrix[6] - matrix[9]) / s
+                q[1] = 0.25f * s
+                q[2] = (matrix[1] + matrix[4]) / s
+                q[3] = (matrix[2] + matrix[8]) / s
+            } else if (matrix[5] > matrix[10]) {
+                val s = 2.0f * kotlin.math.sqrt(1.0f + matrix[5] - matrix[0] - matrix[10])
+                q[0] = (matrix[8] - matrix[2]) / s
+                q[1] = (matrix[1] + matrix[4]) / s
+                q[2] = 0.25f * s
+                q[3] = (matrix[6] + matrix[9]) / s
             } else {
-                if (matrix[0] > matrix[5] && matrix[0] > matrix[10]) {
-                    val s = 2.0f * kotlin.math.sqrt(1.0f + matrix[0] - matrix[5] - matrix[10])
-                    q[0] = (matrix[6] - matrix[9]) / s
-                    q[1] = 0.25f * s
-                    q[2] = (matrix[1] + matrix[4]) / s
-                    q[3] = (matrix[2] + matrix[8]) / s
-                } else if (matrix[5] > matrix[10]) {
-                    val s = 2.0f * kotlin.math.sqrt(1.0f + matrix[5] - matrix[0] - matrix[10])
-                    q[0] = (matrix[8] - matrix[2]) / s
-                    q[1] = (matrix[1] + matrix[4]) / s
-                    q[2] = 0.25f * s
-                    q[3] = (matrix[6] + matrix[9]) / s
-                } else {
-                    val s = 2.0f * kotlin.math.sqrt(1.0f + matrix[10] - matrix[0] - matrix[5])
-                    q[0] = (matrix[1] - matrix[4]) / s
-                    q[1] = (matrix[2] + matrix[8]) / s
-                    q[2] = (matrix[6] + matrix[9]) / s
-                    q[3] = 0.25f * s
-                }
+                val s = 2.0f * kotlin.math.sqrt(1.0f + matrix[10] - matrix[0] - matrix[5])
+                q[0] = (matrix[1] - matrix[4]) / s
+                q[1] = (matrix[2] + matrix[8]) / s
+                q[2] = (matrix[6] + matrix[9]) / s
+                q[3] = 0.25f * s
             }
-            return q
         }
+        return q
     }
 
     override fun onSensorChanged(event: SensorEvent?) {
         when (event?.sensor?.type) {
             Sensor.TYPE_ACCELEROMETER -> {
                 accelerometerReading = event.values.clone()
-                Log.d("StarMap", "Accelerometer: ${accelerometerReading.joinToString()}")
+                // Логируем только при значительных изменениях
+                if (isSensorChanged(accelerometerReading, event.values, 0.1f)) {
+                    Log.d("StarMap", "Accelerometer: ${accelerometerReading.joinToString()}")
+                }
             }
             Sensor.TYPE_MAGNETIC_FIELD -> {
                 magnetometerReading = event.values.clone()
-                Log.d("StarMap", "Magnetometer: ${magnetometerReading.joinToString()}")
+                if (isSensorChanged(magnetometerReading, event.values, 0.5f)) {
+                    Log.d("StarMap", "Magnetometer: ${magnetometerReading.joinToString()}")
+                }
             }
         }
+    }
+
+    private fun isSensorChanged(oldValues: FloatArray, newValues: FloatArray, threshold: Float): Boolean {
+        return (0 until oldValues.size).any { i -> Math.abs(oldValues[i] - newValues[i]) > threshold }
     }
 
     override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) {
