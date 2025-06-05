@@ -278,7 +278,7 @@ class MainActivity : ComponentActivity(), SensorEventListener {
         }
     }
 
-    // naklon
+    // наклон roll выполняется относительно красной оси
     private fun updateOrientation() {
         val success = SensorManager.getRotationMatrix(rotationMatrix, null, smoothedAccelerometer, smoothedMagnetometer)
         if (success) {
