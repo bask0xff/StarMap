@@ -1,6 +1,7 @@
 package com.bask0xff.starmap
 
 import android.content.Context
+import android.content.res.Configuration
 import android.hardware.Sensor
 import android.hardware.SensorEvent
 import android.hardware.SensorEventListener
@@ -282,21 +283,31 @@ class MainActivity : ComponentActivity(), SensorEventListener {
         if (success) {
             Log.d("StarMap", "Raw Accel: x=${smoothedAccelerometer[0]}, y=${smoothedAccelerometer[1]}, z=${smoothedAccelerometer[2]}")
             Log.d("StarMap", "Raw Mag: x=${smoothedMagnetometer[0]}, y=${smoothedMagnetometer[1]}, z=${smoothedMagnetometer[2]}")
-            // Ремаппинг: X -> X, Y -> Y
-            SensorManager.remapCoordinateSystem(
-                rotationMatrix,
-                SensorManager.AXIS_X, SensorManager.AXIS_Y,
-                remappedRotationMatrix
-            )
+            // Проверка ориентации экрана
+            val orientation = resources.configuration.orientation
+            if (orientation == Configuration.ORIENTATION_PORTRAIT) {
+                // Portrait: X -> X, Y -> -Y
+                SensorManager.remapCoordinateSystem(
+                    rotationMatrix,
+                    SensorManager.AXIS_X, SensorManager.AXIS_MINUS_Y,
+                    remappedRotationMatrix
+                )
+            } else {
+                // Landscape: Y -> X, X -> Y (для левого поворота)
+                SensorManager.remapCoordinateSystem(
+                    rotationMatrix,
+                    SensorManager.AXIS_Y, SensorManager.AXIS_X,
+                    remappedRotationMatrix
+                )
+            }
             val angles = FloatArray(3)
             SensorManager.getOrientation(remappedRotationMatrix, angles)
-            // Убрана инверсия yaw
             val yaw = angles[0] * 180f / Math.PI.toFloat()
             val pitch = angles[1] * 180f / Math.PI.toFloat()
             val roll = angles[2] * 180f / Math.PI.toFloat()
             if (isAnglesChanged(angles, lastAngles, 2.0f)) {
                 lastAngles = angles.copyOf()
-                Log.d("StarMap", "Orientation: Yaw=$yaw, Pitch=$pitch, Roll=$roll")
+                Log.d("StarMap", "Orientation: Yaw=$yaw, Pitch=$pitch, Roll=$roll, Screen=${if (orientation == Configuration.ORIENTATION_PORTRAIT) "Portrait" else "Landscape"}")
             }
         } else {
             Matrix.setIdentityM(remappedRotationMatrix, 0)
