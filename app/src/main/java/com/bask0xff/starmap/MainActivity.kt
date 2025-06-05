@@ -1,6 +1,5 @@
 package com.bask0xff.starmap
 
-
 import android.content.Context
 import android.hardware.Sensor
 import android.hardware.SensorEvent
@@ -281,14 +280,18 @@ class MainActivity : ComponentActivity(), SensorEventListener {
     private fun updateOrientation() {
         val success = SensorManager.getRotationMatrix(rotationMatrix, null, smoothedAccelerometer, smoothedMagnetometer)
         if (success) {
-            // Ремаппинг: X -> -Y, Y -> Z, Z -> X
+            Log.d("StarMap", "Raw Accel: x=${smoothedAccelerometer[0]}, y=${smoothedAccelerometer[1]}, z=${smoothedAccelerometer[2]}")
+            Log.d("StarMap", "Raw Mag: x=${smoothedMagnetometer[0]}, y=${smoothedMagnetometer[1]}, z=${smoothedMagnetometer[2]}")
+            // Новый ремаппинг: X -> X, Y -> Y
             SensorManager.remapCoordinateSystem(
                 rotationMatrix,
-                SensorManager.AXIS_MINUS_Y, SensorManager.AXIS_Z,
+                SensorManager.AXIS_X, SensorManager.AXIS_Y,
                 remappedRotationMatrix
             )
             val angles = FloatArray(3)
             SensorManager.getOrientation(remappedRotationMatrix, angles)
+            // Инвертируем yaw
+            angles[0] = -angles[0]
             val yaw = angles[0] * 180f / Math.PI.toFloat()
             val pitch = angles[1] * 180f / Math.PI.toFloat()
             val roll = angles[2] * 180f / Math.PI.toFloat()
