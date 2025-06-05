@@ -1,5 +1,10 @@
 package com.bask0xff.starmap
 
+import android.content.Context
+import android.hardware.Sensor
+import android.hardware.SensorEvent
+import android.hardware.SensorEventListener
+import android.hardware.SensorManager
 import android.opengl.GLES20
 import android.opengl.GLSurfaceView
 import android.opengl.Matrix
@@ -21,9 +26,21 @@ import kotlin.math.cos
 import kotlin.math.sin
 import kotlin.random.Random
 
-class MainActivity : ComponentActivity() {
+class MainActivity : ComponentActivity(), SensorEventListener {
+    private lateinit var sensorManager: SensorManager
+    private var accelerometerReading = FloatArray(3)
+    private var magnetometerReading = FloatArray(3)
+    private var rotationMatrix = FloatArray(16)
+    private var quaternion = FloatArray(4)
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        sensorManager = getSystemService(Context.SENSOR_SERVICE) as SensorManager
+        // Проверка наличия сенсоров
+        val accelerometer = sensorManager.getDefaultSensor(Sensor.TYPE_ACCELEROMETER)
+        val magnetometer = sensorManager.getDefaultSensor(Sensor.TYPE_MAGNETIC_FIELD)
+        Log.d("StarMap", "Accelerometer available: ${accelerometer != null}")
+        Log.d("StarMap", "Magnetometer available: ${magnetometer != null}")
         setContent {
             StarMapScreen()
         }
@@ -94,14 +111,14 @@ class MainActivity : ComponentActivity() {
             GLES20.glUseProgram(program)
             checkGLError("UseProgram")
 
-            // Статическая матрица вида
-            Matrix.setIdentityM(viewMatrix, 0)
-            Matrix.setLookAtM(viewMatrix, 0, 0f, 0f, -5f, 0f, 0f, 0f, 0f, 1f, 0f)
+            // Обновление ориентации
+            updateOrientation()
             val modelMatrix = FloatArray(16)
             Matrix.setIdentityM(modelMatrix, 0)
             val mvpMatrix = FloatArray(16)
             Matrix.multiplyMM(mvpMatrix, 0, projectionMatrix, 0, viewMatrix, 0)
             Matrix.multiplyMM(mvpMatrix, 0, mvpMatrix, 0, modelMatrix, 0)
+            Matrix.multiplyMM(mvpMatrix, 0, mvpMatrix, 0, rotationMatrix, 0) // Применение ориентации
 
             val mvpMatrixHandle = GLES20.glGetUniformLocation(program, "uMVPMatrix")
             GLES20.glUniformMatrix4fv(mvpMatrixHandle, 1, false, mvpMatrix, 0)
@@ -130,19 +147,111 @@ class MainActivity : ComponentActivity() {
             checkGLError("Viewport")
             val ratio = width.toFloat() / height
             Matrix.perspectiveM(projectionMatrix, 0, 60f, ratio, 0.1f, 100f)
+            Matrix.setLookAtM(viewMatrix, 0, 0f, 0f, -5f, 0f, 0f, 0f, 0f, 1f, 0f)
         }
 
         private fun generateStars() {
             for (i in 0 until starCount) {
                 val theta = Random.nextFloat() * 2 * Math.PI.toFloat()
                 val phi = Math.acos((2 * Random.nextFloat() - 1).toDouble()).toFloat()
-                val radius = 5f // Радиус сферы
+                val radius = 5f
                 starPositions[i * 3] = radius * sin(phi) * cos(theta)
                 starPositions[i * 3 + 1] = radius * sin(phi) * sin(theta)
                 starPositions[i * 3 + 2] = radius * cos(phi)
                 Log.d("StarMap", "Star $i: (${starPositions[i * 3]}, ${starPositions[i * 3 + 1]}, ${starPositions[i * 3 + 2]})")
             }
         }
+
+        private fun updateOrientation() {
+            val success = SensorManager.getRotationMatrix(rotationMatrix, null, accelerometerReading, magnetometerReading)
+            if (success) {
+                val q = quaternionFromRotationMatrix(rotationMatrix)
+                quaternion[0] = q[0]
+                quaternion[1] = q[1]
+                quaternion[2] = q[2]
+                quaternion[3] = q[3]
+                Matrix.setIdentityM(rotationMatrix, 0)
+                Matrix.rotateM(rotationMatrix, 0, quaternion[0], quaternion[1], quaternion[2], quaternion[3])
+                Log.d("StarMap", "Orientation updated: Quaternion=${quaternion.joinToString()}")
+            } else {
+                Log.w("StarMap", "Failed to get rotation matrix")
+                Matrix.setIdentityM(rotationMatrix, 0) // Сброс матрицы при неудаче
+            }
+        }
+
+        private fun quaternionFromRotationMatrix(matrix: FloatArray): FloatArray {
+            val trace = matrix[0] + matrix[5] + matrix[10]
+            val q = FloatArray(4)
+            if (trace > 0) {
+                val s = 0.5f / kotlin.math.sqrt(trace + 1.0f)
+                q[0] = 0.25f / s
+                q[1] = (matrix[6] - matrix[9]) * s
+                q[2] = (matrix[8] - matrix[2]) * s
+                q[3] = (matrix[1] - matrix[4]) * s
+            } else {
+                if (matrix[0] > matrix[5] && matrix[0] > matrix[10]) {
+                    val s = 2.0f * kotlin.math.sqrt(1.0f + matrix[0] - matrix[5] - matrix[10])
+                    q[0] = (matrix[6] - matrix[9]) / s
+                    q[1] = 0.25f * s
+                    q[2] = (matrix[1] + matrix[4]) / s
+                    q[3] = (matrix[2] + matrix[8]) / s
+                } else if (matrix[5] > matrix[10]) {
+                    val s = 2.0f * kotlin.math.sqrt(1.0f + matrix[5] - matrix[0] - matrix[10])
+                    q[0] = (matrix[8] - matrix[2]) / s
+                    q[1] = (matrix[1] + matrix[4]) / s
+                    q[2] = 0.25f * s
+                    q[3] = (matrix[6] + matrix[9]) / s
+                } else {
+                    val s = 2.0f * kotlin.math.sqrt(1.0f + matrix[10] - matrix[0] - matrix[5])
+                    q[0] = (matrix[1] - matrix[4]) / s
+                    q[1] = (matrix[2] + matrix[8]) / s
+                    q[2] = (matrix[6] + matrix[9]) / s
+                    q[3] = 0.25f * s
+                }
+            }
+            return q
+        }
+    }
+
+    override fun onSensorChanged(event: SensorEvent?) {
+        when (event?.sensor?.type) {
+            Sensor.TYPE_ACCELEROMETER -> {
+                accelerometerReading = event.values.clone()
+                Log.d("StarMap", "Accelerometer: ${accelerometerReading.joinToString()}")
+            }
+            Sensor.TYPE_MAGNETIC_FIELD -> {
+                magnetometerReading = event.values.clone()
+                Log.d("StarMap", "Magnetometer: ${magnetometerReading.joinToString()}")
+            }
+        }
+    }
+
+    override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) {
+        Log.d("StarMap", "Sensor accuracy changed: ${sensor?.name}, accuracy: $accuracy")
+    }
+
+    override fun onResume() {
+        super.onResume()
+        val accelerometer = sensorManager.getDefaultSensor(Sensor.TYPE_ACCELEROMETER)
+        val magnetometer = sensorManager.getDefaultSensor(Sensor.TYPE_MAGNETIC_FIELD)
+        if (accelerometer != null) {
+            sensorManager.registerListener(this, accelerometer, SensorManager.SENSOR_DELAY_GAME)
+            Log.d("StarMap", "Accelerometer registered")
+        } else {
+            Log.e("StarMap", "Accelerometer not available")
+        }
+        if (magnetometer != null) {
+            sensorManager.registerListener(this, magnetometer, SensorManager.SENSOR_DELAY_GAME)
+            Log.d("StarMap", "Magnetometer registered")
+        } else {
+            Log.e("StarMap", "Magnetometer not available")
+        }
+    }
+
+    override fun onPause() {
+        super.onPause()
+        sensorManager.unregisterListener(this)
+        Log.d("StarMap", "Sensors unregistered")
     }
 
     private fun loadShader(type: Int, shaderCode: String): Int {
@@ -171,14 +280,14 @@ class MainActivity : ComponentActivity() {
         uniform mat4 uMVPMatrix;
         void main() {
             gl_Position = uMVPMatrix * aPosition;
-            gl_PointSize = 10.0; // Ещё больше точек для видимости
+            gl_PointSize = 10.0;
         }
     """.trimIndent()
 
     private val fragmentShaderCode = """
         precision mediump float;
         void main() {
-            gl_FragColor = vec4(1.0, 1.0, 1.0, 1.0); // Белый цвет
+            gl_FragColor = vec4(1.0, 1.0, 1.0, 1.0);
         }
     """.trimIndent()
 }
