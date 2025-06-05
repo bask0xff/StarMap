@@ -87,12 +87,12 @@ class MainActivity : ComponentActivity(), SensorEventListener {
             0f, 0f, 1f, 1f, 0f, 0f, 1f, 1f
         )
         private val sensorAxesVertices = floatArrayOf(
-            // Sensor X-axis (pink), offset to bottom-left
-            -4f, -4f, 0f, -3f, -4f, 0f,
+            // Sensor X-axis (pink)
+            0f, 0f, 0f, -1f, 0f, 0f,
             // Sensor Y-axis (cyan)
-            -4f, -4f, 0f, -4f, -3f, 0f,
+            0f, 0f, 0f, 0f, -1f, 0f,
             // Sensor Z-axis (yellow)
-            -4f, -4f, 0f, -4f, -4f, 1f
+            0f, 0f, 0f, 0f, 0f, -1f
         )
         private val sensorAxesColors = floatArrayOf(
             // Sensor X-axis (pink)
