@@ -278,6 +278,7 @@ class MainActivity : ComponentActivity(), SensorEventListener {
         }
     }
 
+    // naklon
     private fun updateOrientation() {
         val success = SensorManager.getRotationMatrix(rotationMatrix, null, smoothedAccelerometer, smoothedMagnetometer)
         if (success) {
