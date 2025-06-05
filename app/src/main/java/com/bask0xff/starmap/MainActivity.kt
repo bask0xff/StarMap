@@ -309,9 +309,8 @@ class MainActivity : ComponentActivity(), SensorEventListener {
             val angles = FloatArray(3)
             SensorManager.getOrientation(remappedRotationMatrix, angles)
 
-            // Инвертируем yaw и roll для устранения их инверсии
+            // Инвертируем только yaw, оставляем roll без инверсии
             angles[0] = -angles[0] // Инверсия рыскания
-            angles[2] = -angles[2] // Инверсия наклона
 
             val yaw = angles[0] * 180f / Math.PI.toFloat()
             val pitch = angles[1] * 180f / Math.PI.toFloat()
