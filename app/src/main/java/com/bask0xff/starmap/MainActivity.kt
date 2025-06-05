@@ -1,5 +1,6 @@
 package com.bask0xff.starmap
 
+
 import android.content.Context
 import android.hardware.Sensor
 import android.hardware.SensorEvent
@@ -61,6 +62,7 @@ class MainActivity : ComponentActivity(), SensorEventListener {
     inner class StarRenderer : GLSurfaceView.Renderer {
         private lateinit var starBuffer: FloatBuffer
         private lateinit var axesBuffer: FloatBuffer
+        private lateinit var axesColorBuffer: FloatBuffer
         private val projectionMatrix = FloatArray(16)
         private val viewMatrix = FloatArray(16)
         private var starProgram: Int = 0
@@ -68,14 +70,26 @@ class MainActivity : ComponentActivity(), SensorEventListener {
         private val starCount = 100
         private val starPositions = FloatArray(starCount * 3)
         private val axesVertices = floatArrayOf(
-            0f, 0f, 0f, 1f, 0f, 0f, // X-axis (red)
-            0f, 0f, 0f, 0f, 1f, 0f, // Y-axis (green)
-            0f, 0f, 0f, 0f, 0f, 1f  // Z-axis (blue)
+            // X-axis (red)
+            0f, 0f, 0f, // Start
+            1f, 0f, 0f, // End
+            // Y-axis (green)
+            0f, 0f, 0f, // Start
+            0f, 1f, 0f, // End
+            // Z-axis (blue)
+            0f, 0f, 0f, // Start
+            0f, 0f, 1f  // End
         )
         private val axesColors = floatArrayOf(
-            1f, 0f, 0f, 1f, // Red for X
-            0f, 1f, 0f, 1f, // Green for Y
-            0f, 0f, 1f, 1f  // Blue for Z
+            // X-axis (red)
+            1f, 0f, 0f, 1f, // Start
+            1f, 0f, 0f, 1f, // End
+            // Y-axis (green)
+            0f, 1f, 0f, 1f, // Start
+            0f, 1f, 0f, 1f, // End
+            // Z-axis (blue)
+            0f, 0f, 1f, 1f, // Start
+            0f, 0f, 1f, 1f  // End
         )
 
         override fun onSurfaceCreated(gl: GL10?, config: EGLConfig?) {
@@ -98,6 +112,13 @@ class MainActivity : ComponentActivity(), SensorEventListener {
                 .asFloatBuffer()
                 .apply {
                     put(axesVertices)
+                    position(0)
+                }
+            axesColorBuffer = ByteBuffer.allocateDirect(axesColors.size * 4)
+                .order(ByteOrder.nativeOrder())
+                .asFloatBuffer()
+                .apply {
+                    put(axesColors)
                     position(0)
                 }
 
@@ -167,14 +188,8 @@ class MainActivity : ComponentActivity(), SensorEventListener {
             axesBuffer.position(0)
             GLES20.glVertexAttribPointer(axesPositionHandle, 3, GLES20.GL_FLOAT, false, 0, axesBuffer)
             checkGLError("AxesVertexAttribPointer")
-            val colorBuffer = ByteBuffer.allocateDirect(axesColors.size * 4)
-                .order(ByteOrder.nativeOrder())
-                .asFloatBuffer()
-                .apply {
-                    put(axesColors)
-                    position(0)
-                }
-            GLES20.glVertexAttribPointer(axesColorHandle, 4, GLES20.GL_FLOAT, false, 0, colorBuffer)
+            axesColorBuffer.position(0)
+            GLES20.glVertexAttribPointer(axesColorHandle, 4, GLES20.GL_FLOAT, false, 0, axesColorBuffer)
             checkGLError("AxesColorAttribPointer")
 
             GLES20.glLineWidth(5f)
