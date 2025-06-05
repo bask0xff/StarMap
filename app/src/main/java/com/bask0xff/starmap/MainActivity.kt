@@ -278,34 +278,45 @@ class MainActivity : ComponentActivity(), SensorEventListener {
         }
     }
 
-    // naklon
     private fun updateOrientation() {
         val success = SensorManager.getRotationMatrix(rotationMatrix, null, smoothedAccelerometer, smoothedMagnetometer)
         if (success) {
             Log.d("StarMap", "Raw Accel: x=${smoothedAccelerometer[0]}, y=${smoothedAccelerometer[1]}, z=${smoothedAccelerometer[2]}")
             Log.d("StarMap", "Raw Mag: x=${smoothedMagnetometer[0]}, y=${smoothedMagnetometer[1]}, z=${smoothedMagnetometer[2]}")
+            Log.d("StarMap", "Raw Rotation Matrix: ${rotationMatrix.joinToString()}")
+
             // Проверка ориентации экрана
             val orientation = resources.configuration.orientation
             if (orientation == Configuration.ORIENTATION_PORTRAIT) {
-                // Portrait: X -> X, Y -> -Y
+                // Портрет: X -> X, Y -> Y (как во втором коде)
                 SensorManager.remapCoordinateSystem(
                     rotationMatrix,
-                    SensorManager.AXIS_X, SensorManager.AXIS_MINUS_Y,
+                    SensorManager.AXIS_X, SensorManager.AXIS_Y,
                     remappedRotationMatrix
                 )
             } else {
-                // Landscape: Y -> X, X -> Y (для левого поворота)
+                // Альбом: Y -> X, X -> Y (как в первом коде для альбомной)
                 SensorManager.remapCoordinateSystem(
                     rotationMatrix,
                     SensorManager.AXIS_Y, SensorManager.AXIS_X,
                     remappedRotationMatrix
                 )
             }
+
+            Log.d("StarMap", "Remapped Rotation Matrix: ${remappedRotationMatrix.joinToString()}")
+
+            // Получение углов ориентации
             val angles = FloatArray(3)
             SensorManager.getOrientation(remappedRotationMatrix, angles)
+
+            // Инвертируем yaw и roll для устранения их инверсии
+            angles[0] = -angles[0] // Инверсия рыскания
+            angles[2] = -angles[2] // Инверсия наклона
+
             val yaw = angles[0] * 180f / Math.PI.toFloat()
             val pitch = angles[1] * 180f / Math.PI.toFloat()
             val roll = angles[2] * 180f / Math.PI.toFloat()
+
             if (isAnglesChanged(angles, lastAngles, 2.0f)) {
                 lastAngles = angles.copyOf()
                 Log.d("StarMap", "Orientation: Yaw=$yaw, Pitch=$pitch, Roll=$roll, Screen=${if (orientation == Configuration.ORIENTATION_PORTRAIT) "Portrait" else "Landscape"}")
