@@ -1,6 +1,5 @@
 package com.bask0xff.starmap
 
-
 import android.content.Context
 import android.hardware.Sensor
 import android.hardware.SensorEvent
@@ -35,7 +34,6 @@ class MainActivity : ComponentActivity(), SensorEventListener {
     private var smoothedMagnetometer = FloatArray(3)
     private var rotationMatrix = FloatArray(16)
     private var remappedRotationMatrix = FloatArray(16)
-    private var finalRotationMatrix = FloatArray(16)
     private var lastAngles = FloatArray(3)
     private val alpha = 0.1f // Коэффициент сглаживания
 
@@ -106,7 +104,7 @@ class MainActivity : ComponentActivity(), SensorEventListener {
             Matrix.setIdentityM(modelMatrix, 0)
             val mvpMatrix = FloatArray(16)
             Matrix.multiplyMM(mvpMatrix, 0, projectionMatrix, 0, viewMatrix, 0)
-            Matrix.multiplyMM(mvpMatrix, 0, mvpMatrix, 0, finalRotationMatrix, 0)
+            Matrix.multiplyMM(mvpMatrix, 0, mvpMatrix, 0, remappedRotationMatrix, 0)
 
             val mvpMatrixHandle = GLES20.glGetUniformLocation(program, "uMVPMatrix")
             GLES20.glUniformMatrix4fv(mvpMatrixHandle, 1, false, mvpMatrix, 0)
@@ -150,19 +148,14 @@ class MainActivity : ComponentActivity(), SensorEventListener {
     private fun updateOrientation() {
         val success = SensorManager.getRotationMatrix(rotationMatrix, null, smoothedAccelerometer, smoothedMagnetometer)
         if (success) {
-            // Ремаппинг: X -> X, Y -> Z, Z -> -Y
+            // Ремаппинг: X -> -Y, Y -> Z, Z -> X
             SensorManager.remapCoordinateSystem(
                 rotationMatrix,
-                SensorManager.AXIS_X, SensorManager.AXIS_Z,
+                SensorManager.AXIS_MINUS_Y, SensorManager.AXIS_Z,
                 remappedRotationMatrix
             )
-            // Компенсация портретной ориентации (поворот на 90° вокруг Z)
-            Matrix.setIdentityM(finalRotationMatrix, 0)
-            Matrix.rotateM(finalRotationMatrix, 0, 90f, 0f, 0f, 1f)
-            Matrix.multiplyMM(finalRotationMatrix, 0, finalRotationMatrix, 0, remappedRotationMatrix, 0)
-
             val angles = FloatArray(3)
-            SensorManager.getOrientation(finalRotationMatrix, angles)
+            SensorManager.getOrientation(remappedRotationMatrix, angles)
             val yaw = angles[0] * 180f / Math.PI.toFloat()
             val pitch = angles[1] * 180f / Math.PI.toFloat()
             val roll = angles[2] * 180f / Math.PI.toFloat()
@@ -171,7 +164,7 @@ class MainActivity : ComponentActivity(), SensorEventListener {
                 Log.d("StarMap", "Orientation: Yaw=$yaw, Pitch=$pitch, Roll=$roll")
             }
         } else {
-            Matrix.setIdentityM(finalRotationMatrix, 0)
+            Matrix.setIdentityM(remappedRotationMatrix, 0)
         }
     }
 
