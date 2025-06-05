@@ -247,7 +247,7 @@ class MainActivity : ComponentActivity(), SensorEventListener {
             checkGLError("SensorAxesVertexAttribPointer")
             sensorAxesColorBuffer.position(0)
             GLES20.glVertexAttribPointer(axesColorHandle, 4, GLES20.GL_FLOAT, false, 0, sensorAxesColorBuffer)
-            checkGLError("SensorAxesColorAttribPointer")
+            checkGLError("AxesColorAttribPointer")
 
             GLES20.glLineWidth(3f)
             GLES20.glDrawArrays(GLES20.GL_LINES, 0, 6)
@@ -282,7 +282,7 @@ class MainActivity : ComponentActivity(), SensorEventListener {
         if (success) {
             Log.d("StarMap", "Raw Accel: x=${smoothedAccelerometer[0]}, y=${smoothedAccelerometer[1]}, z=${smoothedAccelerometer[2]}")
             Log.d("StarMap", "Raw Mag: x=${smoothedMagnetometer[0]}, y=${smoothedMagnetometer[1]}, z=${smoothedMagnetometer[2]}")
-            // Новый ремаппинг: X -> X, Y -> Y
+            // Ремаппинг: X -> X, Y -> Y
             SensorManager.remapCoordinateSystem(
                 rotationMatrix,
                 SensorManager.AXIS_X, SensorManager.AXIS_Y,
@@ -290,8 +290,7 @@ class MainActivity : ComponentActivity(), SensorEventListener {
             )
             val angles = FloatArray(3)
             SensorManager.getOrientation(remappedRotationMatrix, angles)
-            // Инвертируем yaw
-            angles[0] = -angles[0]
+            // Убрана инверсия yaw
             val yaw = angles[0] * 180f / Math.PI.toFloat()
             val pitch = angles[1] * 180f / Math.PI.toFloat()
             val roll = angles[2] * 180f / Math.PI.toFloat()
