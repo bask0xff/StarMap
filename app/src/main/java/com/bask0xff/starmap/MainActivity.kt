@@ -56,6 +56,16 @@ class MainActivity : ComponentActivity(), SensorEventListener {
         setContent { StarMapScreen() }
     }
 
+    /** https://grok.com/c/1d895243-475a-4bfe-bd83-d2bbd5854413?rid=be0c9988-f541-42b0-93e2-ab1c28b66aa1 - sergongamer
+     * Рекомендуемые значения фильтра:
+     * mag >Примерное количество звёзд
+     * Рекомендация
+     * 4.5f~300–400О чень чистое небо
+     * 4.8f~500–600 Хорошо (рекомендую)
+     * 5.2f~900–1100 Средне
+     * 6.0f3000+ Слишком много
+     * Начни с 4.8f — это хороший баланс.
+     */
     private fun loadStarsFromAssets() {
         try {
             val inputStream = assets.open("stars_bright.csv")
@@ -74,6 +84,12 @@ class MainActivity : ComponentActivity(), SensorEventListener {
                     val dec = parts[8].toFloatOrNull() ?: return@forEachLine
                     val mag = parts[10].toFloatOrNull() ?: 6f
 
+                    // === ФИЛЬТР: только яркие звёзды ===
+                    if (mag > 4.8f) return@forEachLine   // ← Основной фильтр
+
+                    // Дополнительно можно оставить некоторые чуть слабее, если они в известных созвездиях
+                    // if (mag > 5.2f) return@forEachLine
+
                     val raRad = ra * 15f * (PI.toFloat() / 180f)
                     val decRad = dec * (PI.toFloat() / 180f)
 
@@ -81,14 +97,14 @@ class MainActivity : ComponentActivity(), SensorEventListener {
                     val y = cos(decRad) * sin(raRad)
                     val z = sin(decRad)
 
-                    val distance = 9.5f
-                    val size = (7.5f - mag * 1.65f).coerceIn(2.8f, 11f)
+                    val distance = 9.8f
+                    val size = (8.5f - mag * 1.9f).coerceIn(3.5f, 13f)   // ярче = больше точка
 
                     starList.add(Star(x * distance, y * distance, z * distance, size))
                     count++
                 } catch (_: Exception) {}
             }
-            Log.d("StarMap", "Загружено $count звёзд")
+            Log.d("StarMap", "Загружено $count ярких звёзд (mag <= 4.8)")
         } catch (e: Exception) {
             Log.e("StarMap", "Ошибка загрузки CSV", e)
             generateFallbackStars()
