@@ -23,6 +23,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.mutableStateListOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -65,6 +66,8 @@ class MainActivity : ComponentActivity(), SensorEventListener {
     private var smoothedMagnetometer = FloatArray(3)
     private var hasAccelerometer = false
     private var hasMagnetometer = false
+
+    val debugInfo = mutableStateOf("")
 
     // Матрица вращения, обновляется из GL-потока через volatile-копию
     @Volatile
@@ -278,10 +281,8 @@ class MainActivity : ComponentActivity(), SensorEventListener {
             screenLabels.forEach { label ->
                 Text(
                     text = label.name,
-                    color = if (label.name.contains("Медведица") ||
-                        label.name.contains("Кассиопея") ||
-                        label.name.contains("Лебедь") ||
-                        label.name.contains("Орион"))
+                    color = if (label.name.contains("Медведица") || label.name.contains("Кассиопея") ||
+                        label.name.contains("Лебедь") || label.name.contains("Орион"))
                         Color.Yellow else Color.White,
                     fontSize = if (label.name.length > 10) 11.sp else 13.sp,
                     fontWeight = FontWeight.Bold,
@@ -290,6 +291,13 @@ class MainActivity : ComponentActivity(), SensorEventListener {
                         .padding(4.dp)
                 )
             }
+            // Отладочный оверлей
+            Text(
+                text = debugInfo.value,
+                color = Color.Green,
+                fontSize = 10.sp,
+                modifier = Modifier.padding(4.dp)
+            )
         }
     }
 
@@ -367,12 +375,8 @@ class MainActivity : ComponentActivity(), SensorEventListener {
         override fun onDrawFrame(gl: GL10?) {
             GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT)
 
-            // Читаем текущий поворот экрана (обновляется из главного потока через updateDisplayRotation)
             val displayRotation = currentDisplayRotation
 
-            // Строим матрицу ориентации из показаний сенсоров (всё в GL-потоке — потокобезопасно
-            // т.к. smoothedAccelerometer/smoothedMagnetometer volatile-массивы не нужны,
-            // используем синхронизованные копии)
             val accCopy: FloatArray
             val magCopy: FloatArray
             synchronized(this@MainActivity) {
@@ -384,77 +388,49 @@ class MainActivity : ComponentActivity(), SensorEventListener {
             if (!success) {
                 Matrix.setIdentityM(invertedMatrix, 0)
             } else {
-                // Переотображаем оси в зависимости от физической ориентации экрана.
+                // SensorManager даёт матрицу, где строки = оси устройства в мировой (ENU) системе.
+                // Нам нужно: направление "куда смотрит экран" → это -Z устройства в мировых координатах.
                 //
-                // Логика для SkyMap:
-                //   Пользователь держит телефон и направляет его "лицом" в небо.
-                //   Физически: когда телефон горизонтально экраном вверх — смотрим в зенит.
-                //   Когда вертикально — смотрим к горизонту.
+                // Для SkyMap правильный remapping:
+                //   PORTRAIT (ROTATION_0):
+                //     Устройство держат вертикально. Нормаль экрана = -Z устройства.
+                //     Хотим: новый X = X устройства (горизонталь экрана = восток)
+                //             новый Y = Z устройства (вертикаль экрана = зенит)
+                //     → AXIS_X, AXIS_Z
                 //
-                //   SensorManager.getRotationMatrix возвращает матрицу, где:
-                //     - ось X устройства → восток
-                //     - ось Y устройства → север (в проекции на горизонт)
-                //     - ось Z устройства → вверх (зенит)
+                //   LANDSCAPE RIGHT (ROTATION_90):
+                //     Устройство повёрнуто на 90° вправо.
+                //     → AXIS_Y, AXIS_MINUS_X  (стандартный remapping для landscape)
+                //     Но нормаль экрана всё ещё -Z, поэтому добавляем Z:
+                //     → AXIS_MINUS_Y, AXIS_Z
                 //
-                //   Нам нужно: ось Z камеры (forward) = направление нормали к экрану устройства.
-                //   Нормаль экрана в системе координат устройства = -Z (экран смотрит от нас).
-                //   Для портрета (ROTATION_0): remapCoordinateSystem с AXIS_X, AXIS_MINUS_Z
-                //   даёт нам такое отображение, что вперёд камеры = нормаль экрана.
+                //   PORTRAIT FLIPPED (ROTATION_180):
+                //     → AXIS_MINUS_X, AXIS_Z
+                //
+                //   LANDSCAPE LEFT (ROTATION_270):
+                //     → AXIS_Y, AXIS_Z
 
                 val remapSuccess = when (displayRotation) {
-                    Surface.ROTATION_0 ->
-                        // Портрет: X → X, экранный Y → мировой -Z (нормаль экрана к зениту)
-                        SensorManager.remapCoordinateSystem(
-                            rotMatrix,
-                            SensorManager.AXIS_X,
-                            SensorManager.AXIS_MINUS_Z,
-                            remappedMatrix
-                        )
-                    Surface.ROTATION_90 ->
-                        // Альбом вправо: Y → X, экранный Y → мировой Z
-                        SensorManager.remapCoordinateSystem(
-                            rotMatrix,
-                            SensorManager.AXIS_Y,
-                            SensorManager.AXIS_Z,
-                            remappedMatrix
-                        )
-                    Surface.ROTATION_180 ->
-                        // Портрет перевёрнутый
-                        SensorManager.remapCoordinateSystem(
-                            rotMatrix,
-                            SensorManager.AXIS_MINUS_X,
-                            SensorManager.AXIS_Z,
-                            remappedMatrix
-                        )
-                    Surface.ROTATION_270 ->
-                        // Альбом влево
-                        SensorManager.remapCoordinateSystem(
-                            rotMatrix,
-                            SensorManager.AXIS_MINUS_Y,
-                            SensorManager.AXIS_MINUS_Z,
-                            remappedMatrix
-                        )
-                    else ->
-                        SensorManager.remapCoordinateSystem(
-                            rotMatrix,
-                            SensorManager.AXIS_X,
-                            SensorManager.AXIS_MINUS_Z,
-                            remappedMatrix
-                        )
+                    Surface.ROTATION_0   -> SensorManager.remapCoordinateSystem(rotMatrix, SensorManager.AXIS_MINUS_X, SensorManager.AXIS_Z,       remappedMatrix)
+                    Surface.ROTATION_90  -> SensorManager.remapCoordinateSystem(rotMatrix, SensorManager.AXIS_Y,       SensorManager.AXIS_Z,       remappedMatrix)
+                    Surface.ROTATION_180 -> SensorManager.remapCoordinateSystem(rotMatrix, SensorManager.AXIS_X,       SensorManager.AXIS_Z,       remappedMatrix)
+                    Surface.ROTATION_270 -> SensorManager.remapCoordinateSystem(rotMatrix, SensorManager.AXIS_MINUS_Y, SensorManager.AXIS_Z,       remappedMatrix)
+                    else                 -> SensorManager.remapCoordinateSystem(rotMatrix, SensorManager.AXIS_MINUS_X, SensorManager.AXIS_Z,       remappedMatrix)
                 }
 
                 if (!remapSuccess) {
                     Matrix.setIdentityM(invertedMatrix, 0)
                 } else {
-                    // remappedMatrix переводит из системы устройства в мировую систему (ENU).
-                    // Нам нужна обратная — она будет поворачивать звёздную сферу так,
-                    // чтобы в центре экрана оказались звёзды в направлении, куда смотрит камера.
-                    Matrix.invertM(invertedMatrix, 0, remappedMatrix, 0)
+                    // Транспонируем (= инвертируем для матрицы вращения).
+                    // remappedMatrix переводит вектор из системы устройства в мировую.
+                    // Нам нужна обратная: из мировой в систему устройства — это и есть транспонирование.
+                    invertedMatrix[ 0] = remappedMatrix[ 0]; invertedMatrix[ 1] = remappedMatrix[ 4]; invertedMatrix[ 2] = remappedMatrix[ 8]; invertedMatrix[ 3] = 0f
+                    invertedMatrix[ 4] = remappedMatrix[ 1]; invertedMatrix[ 5] = remappedMatrix[ 5]; invertedMatrix[ 6] = remappedMatrix[ 9]; invertedMatrix[ 7] = 0f
+                    invertedMatrix[ 8] = remappedMatrix[ 2]; invertedMatrix[ 9] = remappedMatrix[ 6]; invertedMatrix[10] = remappedMatrix[10]; invertedMatrix[11] = 0f
+                    invertedMatrix[12] = 0f;                 invertedMatrix[13] = 0f;                 invertedMatrix[14] = 0f;                 invertedMatrix[15] = 1f
                 }
             }
 
-            // MVP = Projection * View * InvertedRotation
-            // InvertedRotation вращает мировые координаты в систему камеры
             val vpMatrix = FloatArray(16)
             Matrix.multiplyMM(vpMatrix, 0, projectionMatrix, 0, viewMatrix, 0)
             Matrix.multiplyMM(mvpMatrix, 0, vpMatrix, 0, invertedMatrix, 0)
@@ -604,9 +580,8 @@ class MainActivity : ComponentActivity(), SensorEventListener {
                             smoothedAccelerometer = values.clone()
                             hasAccelerometer = true
                         } else {
-                            for (i in values.indices) {
+                            for (i in values.indices)
                                 smoothedAccelerometer[i] = alpha * values[i] + (1 - alpha) * smoothedAccelerometer[i]
-                            }
                         }
                     }
                     Sensor.TYPE_MAGNETIC_FIELD -> {
@@ -614,17 +589,44 @@ class MainActivity : ComponentActivity(), SensorEventListener {
                             smoothedMagnetometer = values.clone()
                             hasMagnetometer = true
                         } else {
-                            for (i in values.indices) {
+                            for (i in values.indices)
                                 smoothedMagnetometer[i] = alpha * values[i] + (1 - alpha) * smoothedMagnetometer[i]
-                            }
                         }
                     }
                 }
             }
-            // Обновляем поворот экрана в главном потоке
+
+            // Обновляем отладку прямо здесь
+            val rot = FloatArray(16)
+            val acc = smoothedAccelerometer
+            val mag = smoothedMagnetometer
+            if (SensorManager.getRotationMatrix(rot, null, acc, mag)) {
+                val orientation = FloatArray(3)
+                SensorManager.getOrientation(rot, orientation)
+                val azimuth = Math.toDegrees(orientation[0].toDouble()).toInt()
+                val pitch   = Math.toDegrees(orientation[1].toDouble()).toInt()
+                val roll    = Math.toDegrees(orientation[2].toDouble()).toInt()
+
+                mainHandler.post {
+                    debugInfo.value = """
+                    |ACC:  x=${acc[0].fmt()} y=${acc[1].fmt()} z=${acc[2].fmt()}
+                    |MAG:  x=${mag[0].fmt()} y=${mag[1].fmt()} z=${mag[2].fmt()}
+                    |Azimuth(yaw):  $azimuth°
+                    |Pitch:         $pitch°
+                    |Roll:          $roll°
+                    |Display rot:   $currentDisplayRotation
+                    |ROT[0..2]: ${rot[0].fmt()} ${rot[1].fmt()} ${rot[2].fmt()}
+                    |ROT[4..6]: ${rot[4].fmt()} ${rot[5].fmt()} ${rot[6].fmt()}
+                    |ROT[8..10]:${rot[8].fmt()} ${rot[9].fmt()} ${rot[10].fmt()}
+                """.trimMargin()
+                }
+            }
+
             mainHandler.post { updateDisplayRotation() }
         }
     }
+
+    fun Float.fmt() = "%.2f".format(this)
 
     override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) {}
 
