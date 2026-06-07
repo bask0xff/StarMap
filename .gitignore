@@ -13,3 +13,5 @@
 .externalNativeBuild
 .cxx
 local.properties
+/hyg_v42.csv
+/hyg_v42.csv.gz
