@@ -13,10 +13,17 @@ import android.util.Log
 import android.view.Surface
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.padding
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import java.io.BufferedReader
 import java.io.InputStreamReader
@@ -29,6 +36,8 @@ import kotlin.math.PI
 import kotlin.math.acos
 import kotlin.math.cos
 import kotlin.math.sin
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.ui.unit.sp
 
 data class Star(val x: Float, val y: Float, val z: Float, val size: Float)
 
@@ -66,6 +75,25 @@ class MainActivity : ComponentActivity(), SensorEventListener {
      * 6.0f3000+ Слишком много
      * Начни с 4.8f — это хороший баланс.
      */
+    // ==================== СПИСОК ИЗВЕСТНЫХ ЗВЁЗД ====================
+    private val namedStars = mapOf(
+        "Сириус" to Triple(6.7525f, -16.7161f, -1.46f),
+        "Канопус" to Triple(6.3992f, -52.6956f, -0.74f),
+        "Арктур" to Triple(14.2610f, 19.1822f, -0.05f),
+        "Вега" to Triple(18.6167f, 38.7833f, 0.03f),
+        "Капелла" to Triple(5.2783f, 45.9981f, 0.08f),
+        "Ригель" to Triple(5.2422f, -8.2017f, 0.13f),
+        "Процион" to Triple(7.6553f, 5.2250f, 0.34f),
+        "Бетельгейзе" to Triple(5.9194f, 7.4072f, 0.50f),
+        "Ахернар" to Triple(1.6283f, -57.2367f, 0.46f),
+        "Альтаир" to Triple(19.7933f, 8.8683f, 0.77f),
+        "Альдебаран" to Triple(4.5986f, 16.5092f, 0.85f),
+        "Спика" to Triple(13.4197f, -11.1614f, 0.98f),
+        "Антарес" to Triple(16.4903f, -26.4319f, 1.06f),
+        "Денеб" to Triple(20.6906f, 45.2803f, 1.25f),
+        "Регул" to Triple(10.1394f, 11.9672f, 1.35f),
+    )
+
     private fun loadStarsFromAssets() {
         try {
             val inputStream = assets.open("stars_bright.csv")
@@ -84,11 +112,8 @@ class MainActivity : ComponentActivity(), SensorEventListener {
                     val dec = parts[8].toFloatOrNull() ?: return@forEachLine
                     val mag = parts[10].toFloatOrNull() ?: 6f
 
-                    // === ФИЛЬТР: только яркие звёзды ===
-                    if (mag > 4.8f) return@forEachLine   // ← Основной фильтр
-
-                    // Дополнительно можно оставить некоторые чуть слабее, если они в известных созвездиях
-                    // if (mag > 5.2f) return@forEachLine
+                    // === ЖЁСТКИЙ ФИЛЬТР — только самые яркие звёзды ===
+                    if (mag > 2.8f) return@forEachLine   // ← уменьшил до 2.8
 
                     val raRad = ra * 15f * (PI.toFloat() / 180f)
                     val decRad = dec * (PI.toFloat() / 180f)
@@ -98,17 +123,44 @@ class MainActivity : ComponentActivity(), SensorEventListener {
                     val z = sin(decRad)
 
                     val distance = 9.8f
-                    val size = (8.5f - mag * 1.9f).coerceIn(3.5f, 13f)   // ярче = больше точка
+                    val size = when {
+                        mag < 0.5 -> 13.5f
+                        mag < 1.5 -> 10f
+                        else -> 7f
+                    }
 
                     starList.add(Star(x * distance, y * distance, z * distance, size))
                     count++
                 } catch (_: Exception) {}
             }
-            Log.d("StarMap", "Загружено $count ярких звёзд (mag <= 4.8)")
+
+            Log.d("StarMap", "Загружено $count очень ярких звёзд (mag ≤ 2.8)")
+
+            addNamedStars()
+
         } catch (e: Exception) {
             Log.e("StarMap", "Ошибка загрузки CSV", e)
             generateFallbackStars()
         }
+    }
+
+    private fun addNamedStars() {
+        namedStars.forEach { (name, data) ->
+            val (raHours, decDeg, mag) = data
+
+            val raRad = raHours * 15f * (PI.toFloat() / 180f)
+            val decRad = decDeg * (PI.toFloat() / 180f)
+
+            val x = cos(decRad) * cos(raRad)
+            val y = cos(decRad) * sin(raRad)
+            val z = sin(decRad)
+
+            val distance = 9.8f
+            val size = if (mag < 1.0) 14f else 11f
+
+            starList.add(Star(x * distance, y * distance, z * distance, size))
+        }
+        Log.d("StarMap", "Добавлено ${namedStars.size} именованных звёзд")
     }
 
     private fun generateFallbackStars() {
@@ -132,7 +184,29 @@ class MainActivity : ComponentActivity(), SensorEventListener {
         glSurfaceView.setRenderer(StarRenderer())
         glSurfaceView.renderMode = GLSurfaceView.RENDERMODE_CONTINUOUSLY
 
-        AndroidView(factory = { glSurfaceView }, modifier = Modifier.fillMaxSize())
+        Box(modifier = Modifier.fillMaxSize()) {
+            // OpenGL фон
+            AndroidView(
+                factory = { glSurfaceView },
+                modifier = Modifier.fillMaxSize()
+            )
+
+            // Названия самых ярких звёзд (пока статично)
+            Column(
+                modifier = Modifier
+                    .align(Alignment.TopStart)
+                    .padding(16.dp)
+            ) {
+                namedStars.keys.take(12).forEach { name ->
+                    Text(
+                        text = name,
+                        color = Color.White.copy(alpha = 0.85f),
+                        fontSize = 14.sp,
+                        style = MaterialTheme.typography.bodyMedium
+                    )
+                }
+            }
+        }
     }
 
     inner class StarRenderer : GLSurfaceView.Renderer {
