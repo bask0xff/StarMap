@@ -339,10 +339,11 @@ class MainActivity : ComponentActivity(), SensorEventListener {
 
             // Камера смотрит из начала координат вперёд по +Z
             // Звёздная сфера вокруг наблюдателя
+            // В onSurfaceCreated:
             Matrix.setLookAtM(viewMatrix, 0,
-                0f, 0f, 0f,   // позиция камеры — центр сферы
-                0f, 0f, 1f,   // смотрим по +Z
-                0f, 1f, 0f    // "вверх" — ось Y
+                0f, 0f, 0f,   // позиция
+                0f, 1f, 0f,   // смотрим по +Y  ← было 0,0,1
+                0f, 0f, 1f    // "вверх" = +Z   ← было 0,1,0
             )
         }
 
@@ -411,11 +412,11 @@ class MainActivity : ComponentActivity(), SensorEventListener {
                 //     → AXIS_Y, AXIS_Z
 
                 val remapSuccess = when (displayRotation) {
-                    Surface.ROTATION_0   -> SensorManager.remapCoordinateSystem(rotMatrix, SensorManager.AXIS_MINUS_X, SensorManager.AXIS_Z,       remappedMatrix)
-                    Surface.ROTATION_90  -> SensorManager.remapCoordinateSystem(rotMatrix, SensorManager.AXIS_Y,       SensorManager.AXIS_Z,       remappedMatrix)
-                    Surface.ROTATION_180 -> SensorManager.remapCoordinateSystem(rotMatrix, SensorManager.AXIS_X,       SensorManager.AXIS_Z,       remappedMatrix)
-                    Surface.ROTATION_270 -> SensorManager.remapCoordinateSystem(rotMatrix, SensorManager.AXIS_MINUS_Y, SensorManager.AXIS_Z,       remappedMatrix)
-                    else                 -> SensorManager.remapCoordinateSystem(rotMatrix, SensorManager.AXIS_MINUS_X, SensorManager.AXIS_Z,       remappedMatrix)
+                    Surface.ROTATION_0   -> SensorManager.remapCoordinateSystem(rotMatrix, SensorManager.AXIS_X,       SensorManager.AXIS_Z,  remappedMatrix)
+                    Surface.ROTATION_90  -> SensorManager.remapCoordinateSystem(rotMatrix, SensorManager.AXIS_MINUS_Y, SensorManager.AXIS_Z,  remappedMatrix)
+                    Surface.ROTATION_180 -> SensorManager.remapCoordinateSystem(rotMatrix, SensorManager.AXIS_MINUS_X, SensorManager.AXIS_Z,  remappedMatrix)
+                    Surface.ROTATION_270 -> SensorManager.remapCoordinateSystem(rotMatrix, SensorManager.AXIS_Y,       SensorManager.AXIS_Z,  remappedMatrix)
+                    else                 -> SensorManager.remapCoordinateSystem(rotMatrix, SensorManager.AXIS_X,       SensorManager.AXIS_Z,  remappedMatrix)
                 }
 
                 if (!remapSuccess) {
@@ -424,10 +425,13 @@ class MainActivity : ComponentActivity(), SensorEventListener {
                     // Транспонируем (= инвертируем для матрицы вращения).
                     // remappedMatrix переводит вектор из системы устройства в мировую.
                     // Нам нужна обратная: из мировой в систему устройства — это и есть транспонирование.
+                    // Транспонируем
                     invertedMatrix[ 0] = remappedMatrix[ 0]; invertedMatrix[ 1] = remappedMatrix[ 4]; invertedMatrix[ 2] = remappedMatrix[ 8]; invertedMatrix[ 3] = 0f
                     invertedMatrix[ 4] = remappedMatrix[ 1]; invertedMatrix[ 5] = remappedMatrix[ 5]; invertedMatrix[ 6] = remappedMatrix[ 9]; invertedMatrix[ 7] = 0f
                     invertedMatrix[ 8] = remappedMatrix[ 2]; invertedMatrix[ 9] = remappedMatrix[ 6]; invertedMatrix[10] = remappedMatrix[10]; invertedMatrix[11] = 0f
                     invertedMatrix[12] = 0f;                 invertedMatrix[13] = 0f;                 invertedMatrix[14] = 0f;                 invertedMatrix[15] = 1f
+
+                    invertedMatrix[1] = -invertedMatrix[1]; invertedMatrix[5] = -invertedMatrix[5]; invertedMatrix[9] = -invertedMatrix[9]
                 }
             }
 
