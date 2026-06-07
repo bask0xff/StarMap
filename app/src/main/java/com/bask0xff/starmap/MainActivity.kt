@@ -44,6 +44,13 @@ import androidx.compose.ui.text.font.FontWeight
 data class Star(val x: Float, val y: Float, val z: Float, val size: Float)
 data class NamedStar(val name: String, val x: Float, val y: Float, val z: Float)
 data class ScreenLabel(val name: String, val screenX: Float, val screenY: Float)
+
+data class Constellation(
+    val name: String,
+    val lines: List<ConstellationLine>,
+    val labelStar: NamedStar? = null
+)
+
 data class ConstellationLine(val x1: Float, val y1: Float, val z1: Float, val x2: Float, val y2: Float, val z2: Float)
 
 class MainActivity : ComponentActivity(), SensorEventListener {
@@ -61,7 +68,7 @@ class MainActivity : ComponentActivity(), SensorEventListener {
 
     private val starList = mutableListOf<Star>()
     private val namedStarList = mutableListOf<NamedStar>()
-    private val constellationLines = mutableListOf<ConstellationLine>()
+    private val constellations = mutableListOf<Constellation>()
 
     val screenLabels = mutableStateListOf<ScreenLabel>()
 
@@ -70,7 +77,7 @@ class MainActivity : ComponentActivity(), SensorEventListener {
         sensorManager = getSystemService(Context.SENSOR_SERVICE) as SensorManager
 
         loadStarsFromAssets()
-        defineMajorConstellations()
+        defineConstellations()
         setContent { StarMapScreen() }
     }
 
@@ -82,17 +89,14 @@ class MainActivity : ComponentActivity(), SensorEventListener {
 
             starList.clear()
             namedStarList.clear()
-            var count = 0
 
             reader.forEachLine { line ->
                 val parts = line.split(",")
                 if (parts.size < 11) return@forEachLine
-
                 try {
                     val ra = parts[7].toFloatOrNull() ?: return@forEachLine
                     val dec = parts[8].toFloatOrNull() ?: return@forEachLine
                     val mag = parts[10].toFloatOrNull() ?: 6f
-
                     if (mag > 2.5f) return@forEachLine
 
                     val raRad = ra * 15f * (PI.toFloat() / 180f)
@@ -104,15 +108,10 @@ class MainActivity : ComponentActivity(), SensorEventListener {
 
                     val distance = 9.8f
                     val size = if (mag < 1.0) 12f else if (mag < 2.0) 9f else 6.5f
-
                     starList.add(Star(x * distance, y * distance, z * distance, size))
-                    count++
                 } catch (_: Exception) {}
             }
-
-            Log.d("StarMap", "Загружено $count ярких звёзд")
             addImportantNamedStars()
-
         } catch (e: Exception) {
             Log.e("StarMap", "Ошибка загрузки CSV", e)
             generateFallbackStars()
@@ -139,15 +138,12 @@ class MainActivity : ComponentActivity(), SensorEventListener {
             val (raH, decD, _) = data
             val raRad = raH * 15f * (PI.toFloat() / 180f)
             val decRad = decD * (PI.toFloat() / 180f)
-
-            val x = cos(decRad) * cos(raRad)
-            val y = cos(decRad) * sin(raRad)
-            val z = sin(decRad)
-
-            val distance = 9.8f
-            val star = Star(x * distance, y * distance, z * distance, 13f)
+            val x = cos(decRad) * cos(raRad) * 9.8f
+            val y = cos(decRad) * sin(raRad) * 9.8f
+            val z = sin(decRad) * 9.8f
+            val star = Star(x, y, z, 13f)
             starList.add(star)
-            namedStarList.add(NamedStar(name, x * distance, y * distance, z * distance))
+            namedStarList.add(NamedStar(name, x, y, z))
         }
     }
 
@@ -156,72 +152,94 @@ class MainActivity : ComponentActivity(), SensorEventListener {
             val theta = Math.random().toFloat() * 2f * PI.toFloat()
             val phi = acos((2 * Math.random().toFloat() - 1)).toFloat()
             val r = 9f
-            starList.add(Star(
-                r * sin(phi) * cos(theta),
-                r * sin(phi) * sin(theta),
-                r * cos(phi),
-                5f
-            ))
+            starList.add(Star(r * sin(phi) * cos(theta), r * sin(phi) * sin(theta), r * cos(phi), 5f))
         }
     }
 
-    private fun defineMajorConstellations() {
-        constellationLines.clear()
+    private fun defineConstellations() {
+        constellations.clear()
 
-        fun addLine(ra1: Float, dec1: Float, ra2: Float, dec2: Float) {
-            val raRad1 = ra1 * 15f * (PI.toFloat() / 180f)
-            val decRad1 = dec1 * (PI.toFloat() / 180f)
-            val raRad2 = ra2 * 15f * (PI.toFloat() / 180f)
-            val decRad2 = dec2 * (PI.toFloat() / 180f)
+        fun addConstellation(
+            name: String,
+            lines: List<Pair<Pair<Float, Float>, Pair<Float, Float>>>,
+            labelRaDec: Pair<Float, Float>? = null
+        ) {
+            val constLines = mutableListOf<ConstellationLine>()
+            lines.forEach { (p1, p2) ->
+                val (ra1, dec1) = p1
+                val (ra2, dec2) = p2
 
-            val x1 = cos(decRad1) * cos(raRad1) * 9.8f
-            val y1 = cos(decRad1) * sin(raRad1) * 9.8f
-            val z1 = sin(decRad1) * 9.8f
+                val raRad1 = ra1 * 15f * (PI.toFloat() / 180f)
+                val decRad1 = dec1 * (PI.toFloat() / 180f)
+                val raRad2 = ra2 * 15f * (PI.toFloat() / 180f)
+                val decRad2 = dec2 * (PI.toFloat() / 180f)
 
-            val x2 = cos(decRad2) * cos(raRad2) * 9.8f
-            val y2 = cos(decRad2) * sin(raRad2) * 9.8f
-            val z2 = sin(decRad2) * 9.8f
+                val x1 = cos(decRad1) * cos(raRad1) * 9.8f
+                val y1 = cos(decRad1) * sin(raRad1) * 9.8f
+                val z1 = sin(decRad1) * 9.8f
 
-            constellationLines.add(ConstellationLine(x1, y1, z1, x2, y2, z2))
+                val x2 = cos(decRad2) * cos(raRad2) * 9.8f
+                val y2 = cos(decRad2) * sin(raRad2) * 9.8f
+                val z2 = sin(decRad2) * 9.8f
+
+                constLines.add(ConstellationLine(x1, y1, z1, x2, y2, z2))
+            }
+
+            val labelStar = if (labelRaDec != null) {
+                val (ra, dec) = labelRaDec
+                val raRad = ra * 15f * (PI.toFloat() / 180f)
+                val decRad = dec * (PI.toFloat() / 180f)
+                NamedStar(
+                    name,
+                    cos(decRad) * cos(raRad) * 9.8f,
+                    cos(decRad) * sin(raRad) * 9.8f,
+                    sin(decRad) * 9.8f
+                )
+            } else null
+
+            constellations.add(Constellation(name, constLines, labelStar))
         }
 
-        // ====================== БОЛЬШАЯ МЕДВЕДИЦА ======================
-        addLine(11.03f, 61.75f, 11.03f, 56.38f)   // Dubhe - Merak
-        addLine(11.03f, 56.38f, 12.26f, 57.03f)   // Merak - Phecda
-        addLine(12.26f, 57.03f, 12.90f, 55.96f)   // Phecda - Megrez
-        addLine(12.90f, 55.96f, 13.79f, 49.31f)   // Megrez - Alioth
-        addLine(13.79f, 49.31f, 13.40f, 54.93f)   // Alioth - Mizar
-        addLine(13.40f, 54.93f, 13.79f, 49.31f)   // Mizar - Alkaid (дуга)
-        addLine(13.79f, 49.31f, 13.42f, 49.87f)   // продолжение
+        // Большая Медведица
+        addConstellation("Большая Медведица", listOf(
+            11.03f to 61.75f to (11.03f to 56.38f),
+            11.03f to 56.38f to (12.26f to 57.03f),
+            12.26f to 57.03f to (12.90f to 55.96f),
+            12.90f to 55.96f to (13.79f to 49.31f),
+            13.79f to 49.31f to (13.40f to 54.93f),
+            13.40f to 54.93f to (13.79f to 49.31f)
+        ), 11.0f to 55.0f)
 
-        // ====================== МАЛАЯ МЕДВЕДИЦА ======================
-        addLine(2.53f, 89.26f, 14.85f, 74.16f)   // Polaris - Kochab
-        addLine(14.85f, 74.16f, 16.76f, 77.79f)   // Kochab - Pherkad
+        // Малая Медведица
+        addConstellation("Малая Медведица", listOf(
+            2.53f to 89.26f to (14.85f to 74.16f),
+            14.85f to 74.16f to (16.76f to 77.79f)
+        ), 2.53f to 89.0f)
 
-        // ====================== КАССИОПЕЯ ======================
-        addLine(0.675f, 56.54f, 1.977f, 63.67f)   // Schedar - Caph
-        addLine(1.977f, 63.67f, 3.792f, 63.67f)   // Caph - Gamma Cas
-        addLine(3.792f, 63.67f, 5.433f, 60.72f)   // Gamma - Ruchbah
-        addLine(5.433f, 60.72f, 0.675f, 56.54f)   // Ruchbah - Schedar (W)
+        // Кассиопея
+        addConstellation("Кассиопея", listOf(
+            0.675f to 56.54f to (1.977f to 63.67f),
+            1.977f to 63.67f to (3.792f to 63.67f),
+            3.792f to 63.67f to (5.433f to 60.72f),
+            5.433f to 60.72f to (0.675f to 56.54f)
+        ), 1.5f to 61.0f)
 
-        // ====================== ЛЕБЕДЬ (Cygnus) ======================
-        addLine(20.69f, 45.28f, 19.85f, 40.68f)   // Deneb - Gienah
-        addLine(19.85f, 40.68f, 20.37f, 36.39f)   // Gienah - Delta Cyg
-        addLine(20.69f, 45.28f, 19.51f, 27.96f)   // Deneb - Albireo
+        // Лебедь
+        addConstellation("Лебедь", listOf(
+            20.69f to 45.28f to (19.85f to 40.68f),
+            19.85f to 40.68f to (20.37f to 36.39f),
+            20.69f to 45.28f to (19.51f to 27.96f)
+        ), 20.69f to 45.0f)
 
-        // ====================== ОРИОН ======================
-        addLine(5.92f, 7.41f, 5.24f, -8.20f)     // Betelgeuse - Rigel
-        addLine(5.60f, -1.20f, 5.24f, -8.20f)     // Bellatrix - Rigel
-        addLine(5.60f, -1.20f, 5.92f, 7.41f)      // Bellatrix - Betelgeuse
-        addLine(5.42f, -0.30f, 5.60f, -1.20f)     // Mintaka - Bellatrix
+        // Орион
+        addConstellation("Орион", listOf(
+            5.92f to 7.41f to (5.24f to -8.20f),
+            5.60f to -1.20f to (5.24f to -8.20f),
+            5.60f to -1.20f to (5.92f to 7.41f),
+            5.42f to -0.30f to (5.60f to -1.20f)
+        ), 5.6f to 0.0f)
 
-        // ====================== ЛЕВ ======================
-        addLine(10.14f, 11.97f, 11.30f, 20.19f)   // Regulus - Algieba
-
-        // ====================== ЛИРА ======================
-        addLine(18.62f, 38.78f, 18.62f, 38.78f)   // Vega (центр)
-
-        Log.d("StarMap", "Созвездия загружены: ${constellationLines.size} линий")
+        Log.d("StarMap", "Загружено ${constellations.size} созвездий")
     }
 
     @Composable
@@ -232,11 +250,7 @@ class MainActivity : ComponentActivity(), SensorEventListener {
         glSurfaceView.renderMode = GLSurfaceView.RENDERMODE_CONTINUOUSLY
 
         Box(modifier = Modifier.fillMaxSize()) {
-            AndroidView(
-                factory = { glSurfaceView },
-                modifier = Modifier.fillMaxSize()
-            )
-
+            AndroidView(factory = { glSurfaceView }, modifier = Modifier.fillMaxSize())
             LabelsOverlay()
         }
     }
@@ -246,9 +260,12 @@ class MainActivity : ComponentActivity(), SensorEventListener {
         Box(modifier = Modifier.fillMaxSize()) {
             screenLabels.forEach { label ->
                 Text(
-                    text = "★ ${label.name}",
-                    color = Color.White,
-                    fontSize = 13.sp,
+                    text = label.name,
+                    color = if (label.name.contains("Медведица") || label.name.contains("Кассиопея") ||
+                        label.name.contains("Лебедь") || label.name.contains("Орион"))
+                        Color.Yellow else Color.White,
+                    fontSize = if (label.name.length > 10) 11.sp else 13.sp,
+                    fontWeight = FontWeight.Bold,
                     modifier = Modifier
                         .offset(x = label.screenX.dp, y = label.screenY.dp)
                         .padding(4.dp)
@@ -258,7 +275,6 @@ class MainActivity : ComponentActivity(), SensorEventListener {
     }
 
     inner class StarRenderer : GLSurfaceView.Renderer {
-
         private lateinit var starPositionBuffer: FloatBuffer
         private lateinit var starSizeBuffer: FloatBuffer
         private lateinit var constellationBuffer: FloatBuffer
@@ -320,9 +336,11 @@ class MainActivity : ComponentActivity(), SensorEventListener {
 
         private fun prepareConstellationBuffer() {
             val vertices = mutableListOf<Float>()
-            constellationLines.forEach { line ->
-                vertices.add(line.x1); vertices.add(line.y1); vertices.add(line.z1)
-                vertices.add(line.x2); vertices.add(line.y2); vertices.add(line.z2)
+            constellations.forEach { const ->
+                const.lines.forEach { line ->
+                    vertices.add(line.x1); vertices.add(line.y1); vertices.add(line.z1)
+                    vertices.add(line.x2); vertices.add(line.y2); vertices.add(line.z2)
+                }
             }
             constellationBuffer = createFloatBuffer(vertices.toFloatArray())
         }
@@ -349,7 +367,7 @@ class MainActivity : ComponentActivity(), SensorEventListener {
         }
 
         private fun drawConstellations(mvp: FloatArray) {
-            if (constellationLines.isEmpty()) return
+            if (constellations.isEmpty()) return
 
             GLES20.glUseProgram(lineProgram)
             GLES20.glUniformMatrix4fv(GLES20.glGetUniformLocation(lineProgram, "uMVPMatrix"), 1, false, mvp, 0)
@@ -359,8 +377,8 @@ class MainActivity : ComponentActivity(), SensorEventListener {
             constellationBuffer.position(0)
             GLES20.glVertexAttribPointer(posHandle, 3, GLES20.GL_FLOAT, false, 0, constellationBuffer)
 
-            GLES20.glLineWidth(2.5f)
-            GLES20.glDrawArrays(GLES20.GL_LINES, 0, constellationLines.size * 2)
+            GLES20.glLineWidth(3f)
+            GLES20.glDrawArrays(GLES20.GL_LINES, 0, constellations.sumOf { it.lines.size } * 2)
 
             GLES20.glDisableVertexAttribArray(posHandle)
         }
@@ -436,21 +454,40 @@ class MainActivity : ComponentActivity(), SensorEventListener {
             val tempLabels = mutableListOf<ScreenLabel>()
             val viewport = intArrayOf(0, 0, width, height)
 
+            // Звёзды
             namedStarList.forEach { star ->
                 val winPos = FloatArray(4)
                 val objPos = floatArrayOf(star.x, star.y, star.z, 1f)
-
                 Matrix.multiplyMV(winPos, 0, mvpMatrixForProjection, 0, objPos, 0)
 
                 if (winPos[3] > 0.1f) {
                     val ndcX = winPos[0] / winPos[3]
                     val ndcY = winPos[1] / winPos[3]
-
                     val screenX = (ndcX * 0.5f + 0.5f) * viewport[2]
                     val screenY = (1.0f - (ndcY * 0.5f + 0.5f)) * viewport[3]
 
                     if (screenX in 0f..viewport[2].toFloat() && screenY in 0f..viewport[3].toFloat()) {
                         tempLabels.add(ScreenLabel(star.name, screenX, screenY - 25f))
+                    }
+                }
+            }
+
+            // Названия созвездий
+            constellations.forEach { const ->
+                const.labelStar?.let { labelStar ->
+                    val winPos = FloatArray(4)
+                    val objPos = floatArrayOf(labelStar.x, labelStar.y, labelStar.z, 1f)
+                    Matrix.multiplyMV(winPos, 0, mvpMatrixForProjection, 0, objPos, 0)
+
+                    if (winPos[3] > 0.1f) {
+                        val ndcX = winPos[0] / winPos[3]
+                        val ndcY = winPos[1] / winPos[3]
+                        val screenX = (ndcX * 0.5f + 0.5f) * viewport[2]
+                        val screenY = (1.0f - (ndcY * 0.5f + 0.5f)) * viewport[3]
+
+                        if (screenX in 0f..viewport[2].toFloat() && screenY in 0f..viewport[3].toFloat()) {
+                            tempLabels.add(ScreenLabel(const.name, screenX - 40f, screenY - 45f))
+                        }
                     }
                 }
             }
@@ -520,7 +557,6 @@ class MainActivity : ComponentActivity(), SensorEventListener {
         sensorManager.unregisterListener(this)
     }
 
-    // ==================== ШЕЙДЕРЫ ====================
     private val starVertexShaderCode = """
         attribute vec4 aPosition;
         attribute float aSize;
@@ -568,7 +604,7 @@ class MainActivity : ComponentActivity(), SensorEventListener {
     private val lineFragmentShaderCode = """
         precision mediump float;
         void main() {
-            gl_FragColor = vec4(0.4, 0.8, 1.0, 0.85);
+            gl_FragColor = vec4(0.6, 0.85, 1.0, 0.9);
         }
     """.trimIndent()
 }
