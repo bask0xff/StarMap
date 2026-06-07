@@ -9,26 +9,24 @@ import android.opengl.GLES20
 import android.opengl.GLSurfaceView
 import android.opengl.Matrix
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.util.Log
 import android.view.Surface
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
-import androidx.compose.ui.Alignment
+import androidx.compose.foundation.layout.padding
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.mutableStateListOf
+import androidx.compose.runtime.remember
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.material3.Text
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.remember
-import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.viewinterop.AndroidView
 import java.io.BufferedReader
 import java.io.InputStreamReader
@@ -45,6 +43,7 @@ import androidx.compose.ui.text.font.FontWeight
 
 data class Star(val x: Float, val y: Float, val z: Float, val size: Float)
 data class NamedStar(val name: String, val x: Float, val y: Float, val z: Float)
+data class ScreenLabel(val name: String, val screenX: Float, val screenY: Float)
 
 class MainActivity : ComponentActivity(), SensorEventListener {
 
@@ -57,11 +56,13 @@ class MainActivity : ComponentActivity(), SensorEventListener {
     private var remappedRotationMatrix = FloatArray(16)
     private var invertedRotationMatrix = FloatArray(16)
 
-    private var lastAngles = FloatArray(3)
     private val alpha = 0.28f
 
     private val starList = mutableListOf<Star>()
     private val namedStarList = mutableListOf<NamedStar>()
+
+    // Для динамических подписей
+    val screenLabels = mutableStateListOf<ScreenLabel>()
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -133,7 +134,7 @@ class MainActivity : ComponentActivity(), SensorEventListener {
         )
 
         important.forEach { (name, data) ->
-            val (raH, decD, mag) = data
+            val (raH, decD, _) = data
             val raRad = raH * 15f * (PI.toFloat() / 180f)
             val decRad = decD * (PI.toFloat() / 180f)
 
@@ -176,47 +177,34 @@ class MainActivity : ComponentActivity(), SensorEventListener {
                 modifier = Modifier.fillMaxSize()
             )
 
-            // Динамические подписи возле звёзд
-            StarLabelsOverlay()
+            LabelsOverlay()
         }
     }
 
     @Composable
-    fun StarLabelsOverlay() {
-        val context = LocalContext.current
-        // Здесь можно получить текущую ориентацию и матрицы, но для начала — упрощённый вариант
-
+    fun LabelsOverlay() {
         Box(modifier = Modifier.fillMaxSize()) {
-            // Пример позиций (в дальнейшем можно делать динамически)
-            // Для реальной привязки нужно передавать проекцию из Renderer
-            listOf(
-                Triple("Сириус", 0.25f, 0.35f),   // x, y в диапазоне 0..1
-                Triple("Вега",    0.65f, 0.22f),
-                Triple("Арктур",  0.45f, 0.55f),
-                Triple("Ригель",  0.15f, 0.70f),
-                // добавляй остальные
-            ).forEach { (name, relX, relY) ->
+            screenLabels.forEach { label ->
                 Text(
-                    text = "★ $name",
+                    text = "★ ${label.name}",
                     color = Color.White,
                     fontSize = 13.sp,
                     modifier = Modifier
+                        .offset(x = label.screenX.dp, y = label.screenY.dp)
                         .padding(4.dp)
-                        .offset(
-                            x = (relX * 800).dp,   // подстраивай под ширину экрана
-                            y = (relY * 600).dp
-                        )
                 )
             }
         }
     }
 
     inner class StarRenderer : GLSurfaceView.Renderer {
+
         private lateinit var starPositionBuffer: FloatBuffer
         private lateinit var starSizeBuffer: FloatBuffer
 
         private val projectionMatrix = FloatArray(16)
         private val viewMatrix = FloatArray(16)
+        private val mvpMatrixForProjection = FloatArray(16)
 
         private var starProgram: Int = 0
         private var axesProgram: Int = 0
@@ -229,6 +217,10 @@ class MainActivity : ComponentActivity(), SensorEventListener {
         private lateinit var axesColorBuffer: FloatBuffer
         private lateinit var sensorAxesBuffer: FloatBuffer
         private lateinit var sensorAxesColorBuffer: FloatBuffer
+
+        private var width = 0
+        private var height = 0
+        private val mainHandler = Handler(Looper.getMainLooper())
 
         override fun onSurfaceCreated(gl: GL10?, config: EGLConfig?) {
             GLES20.glClearColor(0.005f, 0.005f, 0.025f, 1.0f)
@@ -267,18 +259,48 @@ class MainActivity : ComponentActivity(), SensorEventListener {
 
             updateOrientation()
 
-            val mvpMatrix = FloatArray(16)
-            Matrix.multiplyMM(mvpMatrix, 0, projectionMatrix, 0, viewMatrix, 0)
-            Matrix.multiplyMM(mvpMatrix, 0, mvpMatrix, 0, invertedRotationMatrix, 0)
+            Matrix.multiplyMM(mvpMatrixForProjection, 0, projectionMatrix, 0, viewMatrix, 0)
+            Matrix.multiplyMM(mvpMatrixForProjection, 0, mvpMatrixForProjection, 0, invertedRotationMatrix, 0)
 
-            drawStars(mvpMatrix)
-            drawAxes(mvpMatrix, axesBuffer, axesColorBuffer, 5f)
+            drawStars(mvpMatrixForProjection)
+            drawAxes(mvpMatrixForProjection, axesBuffer, axesColorBuffer, 5f)
 
             val sensorMvp = FloatArray(16).apply {
                 Matrix.multiplyMM(this, 0, projectionMatrix, 0, viewMatrix, 0)
                 Matrix.multiplyMM(this, 0, this, 0, invertedRotationMatrix, 0)
             }
             drawAxes(sensorMvp, sensorAxesBuffer, sensorAxesColorBuffer, 3f)
+
+            updateScreenLabels()
+        }
+
+        private fun updateScreenLabels() {
+            val tempLabels = mutableListOf<ScreenLabel>()
+            val viewport = intArrayOf(0, 0, width, height)
+
+            namedStarList.forEach { star ->
+                val winPos = FloatArray(4)
+                val objPos = floatArrayOf(star.x, star.y, star.z, 1f)
+
+                Matrix.multiplyMV(winPos, 0, mvpMatrixForProjection, 0, objPos, 0)
+
+                if (winPos[3] > 0.1f) {
+                    val ndcX = winPos[0] / winPos[3]
+                    val ndcY = winPos[1] / winPos[3]
+
+                    val screenX = (ndcX * 0.5f + 0.5f) * viewport[2]
+                    val screenY = (1.0f - (ndcY * 0.5f + 0.5f)) * viewport[3]
+
+                    if (screenX in 0f..viewport[2].toFloat() && screenY in 0f..viewport[3].toFloat()) {
+                        tempLabels.add(ScreenLabel(star.name, screenX, screenY - 25f))
+                    }
+                }
+            }
+
+            mainHandler.post {
+                screenLabels.clear()
+                screenLabels.addAll(tempLabels)
+            }
         }
 
         private fun drawStars(mvpMatrix: FloatArray) {
@@ -323,6 +345,8 @@ class MainActivity : ComponentActivity(), SensorEventListener {
         }
 
         override fun onSurfaceChanged(gl: GL10?, width: Int, height: Int) {
+            this.width = width
+            this.height = height
             GLES20.glViewport(0, 0, width, height)
             val ratio = width.toFloat() / height
             Matrix.perspectiveM(projectionMatrix, 0, 55f, ratio, 0.1f, 100f)
