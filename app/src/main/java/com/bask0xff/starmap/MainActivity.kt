@@ -606,6 +606,14 @@ class MainActivity : ComponentActivity(), SensorEventListener {
         Matrix.rotateM(this, 0, 90f, 1f, 0f, 0f)
     }
 
+    private var FLIP_X = 1f  // Изменяйте только эти два флага
+    private var FLIP_Y = 1f  // в зависимости от теста ниже
+
+    private val viewAdjustmentMatrix = FloatArray(16).apply {
+        Matrix.setIdentityM(this, 0)
+        Matrix.rotateM(this, 0, 90f, 1f, 0f, 0f)
+    }
+
     private fun updateOrientation() {
         val rot = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) {
             display?.rotation ?: Surface.ROTATION_0
@@ -614,41 +622,22 @@ class MainActivity : ComponentActivity(), SensorEventListener {
             windowManager.defaultDisplay.rotation
         }
 
-        // 1. Берем чистую инвертированную матрицу вращения (мир крутится противоположно телефону)
-        val invertedRotation = FloatArray(16)
-        Matrix.invertM(invertedRotation, 0, rotationMatrix, 0)
-
-        // 2. Применяем базовую AR-коррекцию осей
+        // Базовая чистая матрица (без инверсий)
         val baseGlMatrix = FloatArray(16)
-        Matrix.multiplyMM(baseGlMatrix, 0, viewAdjustmentMatrix, 0, invertedRotation, 0)
+        Matrix.multiplyMM(baseGlMatrix, 0, viewAdjustmentMatrix, 0, rotationMatrix, 0)
 
-        // 3. Компенсируем физический поворот самого экрана (Portrait / Landscape)
-        Matrix.setIdentityM(glRotationMatrix, 0)
+        val orientedMatrix = FloatArray(16)
+        Matrix.setIdentityM(orientedMatrix, 0)
         when (rot) {
-            Surface.ROTATION_0 -> {
-                // В портретном режиме копируем как есть
-                System.arraycopy(baseGlMatrix, 0, glRotationMatrix, 0, 16)
-            }
-            Surface.ROTATION_90 -> {
-                Matrix.rotateM(glRotationMatrix, 0, baseGlMatrix, 0, 90f, 0f, 0f, 1f)
-            }
-            Surface.ROTATION_180 -> {
-                Matrix.rotateM(glRotationMatrix, 0, baseGlMatrix, 0, 180f, 0f, 0f, 1f)
-            }
-            Surface.ROTATION_270 -> {
-                Matrix.rotateM(glRotationMatrix, 0, baseGlMatrix, 0, -90f, 0f, 0f, 1f)
-            }
+            Surface.ROTATION_0 -> System.arraycopy(baseGlMatrix, 0, orientedMatrix, 0, 16)
+            Surface.ROTATION_90 -> Matrix.rotateM(orientedMatrix, 0, baseGlMatrix, 0, 90f, 0f, 0f, 1f)
+            Surface.ROTATION_180 -> Matrix.rotateM(orientedMatrix, 0, baseGlMatrix, 0, 180f, 0f, 0f, 1f)
+            Surface.ROTATION_270 -> Matrix.rotateM(orientedMatrix, 0, baseGlMatrix, 0, -90f, 0f, 0f, 1f)
         }
 
-        // Логирование реальных углов телефона для контроля (без влияния на отрисовку)
-        if (System.currentTimeMillis() % 1000 < 20) {
-            val orientation = FloatArray(3)
-            SensorManager.getOrientation(rotationMatrix, orientation)
-            val azimuth = Math.toDegrees(orientation[0].toDouble()).toFloat()
-            val pitch = Math.toDegrees(orientation[1].toDouble()).toFloat()
-            val roll = Math.toDegrees(orientation[2].toDouble()).toFloat()
-            Log.d("StarMap", "Rot=$rot | Azimuth=${azimuth.toInt()}° Pitch=${pitch.toInt()}° Roll=${roll.toInt()}°")
-        }
+        // Финальное жесткое управление инверсией осей экрана
+        Matrix.setIdentityM(glRotationMatrix, 0)
+        Matrix.scaleM(glRotationMatrix, 0, orientedMatrix, 0, FLIP_X, FLIP_Y, 1f)
     }
 
     override fun onSensorChanged(event: SensorEvent?) {
