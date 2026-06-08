@@ -598,6 +598,14 @@ class MainActivity : ComponentActivity(), SensorEventListener {
             .asFloatBuffer()
             .apply { put(data); position(0) }
 
+    private val viewAdjustmentMatrix = FloatArray(16).apply {
+        // Базовая матрица трансформации из координат датчиков в систему координат камеры OpenGL
+        Matrix.setIdentityM(this, 0)
+        // Поворачиваем мир вокруг оси X, чтобы при вертикальном положении телефона (камера смотрит вперед)
+        // горизонт находился на своем месте, а небо было сверху.
+        Matrix.rotateM(this, 0, 90f, 1f, 0f, 0f)
+    }
+
     private fun updateOrientation() {
         val rot = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) {
             display?.rotation ?: Surface.ROTATION_0
@@ -606,37 +614,36 @@ class MainActivity : ComponentActivity(), SensorEventListener {
             windowManager.defaultDisplay.rotation
         }
 
-        var axisX = SensorManager.AXIS_X
-        var axisY = SensorManager.AXIS_Z // Стандарт для Portrait при направлении камеры на небо
+        // 1. Берем чистую инвертированную матрицу вращения (мир крутится противоположно телефону)
+        val invertedRotation = FloatArray(16)
+        Matrix.invertM(invertedRotation, 0, rotationMatrix, 0)
 
+        // 2. Применяем базовую AR-коррекцию осей
+        val baseGlMatrix = FloatArray(16)
+        Matrix.multiplyMM(baseGlMatrix, 0, viewAdjustmentMatrix, 0, invertedRotation, 0)
+
+        // 3. Компенсируем физический поворот самого экрана (Portrait / Landscape)
+        Matrix.setIdentityM(glRotationMatrix, 0)
         when (rot) {
             Surface.ROTATION_0 -> {
-                axisX = SensorManager.AXIS_X
-                axisY = SensorManager.AXIS_Z
+                // В портретном режиме копируем как есть
+                System.arraycopy(baseGlMatrix, 0, glRotationMatrix, 0, 16)
             }
             Surface.ROTATION_90 -> {
-                axisX = SensorManager.AXIS_Z
-                axisY = SensorManager.AXIS_MINUS_X
+                Matrix.rotateM(glRotationMatrix, 0, baseGlMatrix, 0, 90f, 0f, 0f, 1f)
             }
             Surface.ROTATION_180 -> {
-                axisX = SensorManager.AXIS_MINUS_X
-                axisY = SensorManager.AXIS_MINUS_Z
+                Matrix.rotateM(glRotationMatrix, 0, baseGlMatrix, 0, 180f, 0f, 0f, 1f)
             }
             Surface.ROTATION_270 -> {
-                axisX = SensorManager.AXIS_MINUS_Z
-                axisY = SensorManager.AXIS_X
+                Matrix.rotateM(glRotationMatrix, 0, baseGlMatrix, 0, -90f, 0f, 0f, 1f)
             }
         }
 
-        SensorManager.remapCoordinateSystem(rotationMatrix, axisX, axisY, remappedRotationMatrix)
-
-        // Инвертируем матрицу для OpenGL, чтобы вращалась сцена, а не камера
-        Matrix.invertM(glRotationMatrix, 0, remappedRotationMatrix, 0)
-
-        // Безопасное логирование углов (чтобы не прыгали из-за getOrientation)
+        // Логирование реальных углов телефона для контроля (без влияния на отрисовку)
         if (System.currentTimeMillis() % 1000 < 20) {
             val orientation = FloatArray(3)
-            SensorManager.getOrientation(remappedRotationMatrix, orientation)
+            SensorManager.getOrientation(rotationMatrix, orientation)
             val azimuth = Math.toDegrees(orientation[0].toDouble()).toFloat()
             val pitch = Math.toDegrees(orientation[1].toDouble()).toFloat()
             val roll = Math.toDegrees(orientation[2].toDouble()).toFloat()
