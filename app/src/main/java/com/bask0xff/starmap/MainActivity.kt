@@ -599,12 +599,6 @@ class MainActivity : ComponentActivity(), SensorEventListener {
             .apply { put(data); position(0) }
 
     private fun updateOrientation() {
-        if (!SensorManager.getRotationMatrix(rotationMatrix, null, smoothedAccelerometer, smoothedMagnetometer)) {
-            Matrix.setIdentityM(glRotationMatrix, 0)
-            Log.w("StarMap", "Не удалось получить rotationMatrix из сенсоров")
-            return
-        }
-
         val rot = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) {
             display?.rotation ?: Surface.ROTATION_0
         } else {
@@ -613,7 +607,7 @@ class MainActivity : ComponentActivity(), SensorEventListener {
         }
 
         var axisX = SensorManager.AXIS_X
-        var axisY = SensorManager.AXIS_Z // Инициализируем базовые AR-оси для Портретного режима перед глазами
+        var axisY = SensorManager.AXIS_Z // Стандарт для Portrait при направлении камеры на небо
 
         when (rot) {
             Surface.ROTATION_0 -> {
@@ -636,10 +630,10 @@ class MainActivity : ComponentActivity(), SensorEventListener {
 
         SensorManager.remapCoordinateSystem(rotationMatrix, axisX, axisY, remappedRotationMatrix)
 
-        // Получаем инвертированную матрицу сцены, чтобы вращать мир противоположно движениям телефона
+        // Инвертируем матрицу для OpenGL, чтобы вращалась сцена, а не камера
         Matrix.invertM(glRotationMatrix, 0, remappedRotationMatrix, 0)
 
-        // Информативное логирование без захламления логов
+        // Безопасное логирование углов (чтобы не прыгали из-за getOrientation)
         if (System.currentTimeMillis() % 1000 < 20) {
             val orientation = FloatArray(3)
             SensorManager.getOrientation(remappedRotationMatrix, orientation)
@@ -652,18 +646,9 @@ class MainActivity : ComponentActivity(), SensorEventListener {
 
     override fun onSensorChanged(event: SensorEvent?) {
         event?.let {
-            val values = it.values.clone()
-            when (it.sensor.type) {
-                Sensor.TYPE_ACCELEROMETER -> {
-                    for (i in values.indices) {
-                        smoothedAccelerometer[i] = alpha * values[i] + (1 - alpha) * smoothedAccelerometer[i]
-                    }
-                }
-                Sensor.TYPE_MAGNETIC_FIELD -> {
-                    for (i in values.indices) {
-                        smoothedMagnetometer[i] = alpha * values[i] + (1 - alpha) * smoothedMagnetometer[i]
-                    }
-                }
+            if (it.sensor.type == Sensor.TYPE_ROTATION_VECTOR) {
+                // Преобразуем вектор вращения напрямую в матрицу 4х4
+                SensorManager.getRotationMatrixFromVector(rotationMatrix, it.values)
             }
         }
     }
@@ -672,10 +657,8 @@ class MainActivity : ComponentActivity(), SensorEventListener {
 
     override fun onResume() {
         super.onResume()
-        sensorManager.getDefaultSensor(Sensor.TYPE_ACCELEROMETER)?.let {
-            sensorManager.registerListener(this, it, SensorManager.SENSOR_DELAY_GAME)
-        }
-        sensorManager.getDefaultSensor(Sensor.TYPE_MAGNETIC_FIELD)?.let {
+        // Используем вектор вращения для плавной и стабильной AR-ориентации
+        sensorManager.getDefaultSensor(Sensor.TYPE_ROTATION_VECTOR)?.let {
             sensorManager.registerListener(this, it, SensorManager.SENSOR_DELAY_GAME)
         }
     }
