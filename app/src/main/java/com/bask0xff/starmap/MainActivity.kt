@@ -13,7 +13,6 @@ import android.os.Handler
 import android.os.Looper
 import android.util.Log
 import android.view.Surface
-import android.view.WindowManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.Box
@@ -23,7 +22,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.mutableStateListOf
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -35,6 +33,7 @@ import java.io.InputStreamReader
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.nio.FloatBuffer
+import java.util.Calendar
 import javax.microedition.khronos.egl.EGLConfig
 import javax.microedition.khronos.opengles.GL10
 import kotlin.math.PI
@@ -45,7 +44,7 @@ import androidx.compose.ui.text.font.FontWeight
 
 data class Star(val x: Float, val y: Float, val z: Float, val size: Float)
 data class NamedStar(val name: String, val x: Float, val y: Float, val z: Float)
-data class ScreenLabel(val name: String, val screenX: Float, val screenY: Float)
+data class ScreenLabel(val name: String, val screenX: Float, val screenY: Float, val color: Color = Color.White)
 
 data class Constellation(
     val name: String,
@@ -53,10 +52,7 @@ data class Constellation(
     val labelStar: NamedStar? = null
 )
 
-data class ConstellationLine(
-    val x1: Float, val y1: Float, val z1: Float,
-    val x2: Float, val y2: Float, val z2: Float
-)
+data class ConstellationLine(val x1: Float, val y1: Float, val z1: Float, val x2: Float, val y2: Float, val z2: Float)
 
 class MainActivity : ComponentActivity(), SensorEventListener {
 
@@ -64,20 +60,12 @@ class MainActivity : ComponentActivity(), SensorEventListener {
 
     private var smoothedAccelerometer = FloatArray(3)
     private var smoothedMagnetometer = FloatArray(3)
-    private var hasAccelerometer = false
-    private var hasMagnetometer = false
 
-    val debugInfo = mutableStateOf("")
+    private var rotationMatrix = FloatArray(16)
+    private var remappedRotationMatrix = FloatArray(16)
+    private var invertedRotationMatrix = FloatArray(16)
 
-    // Матрица вращения, обновляется из GL-потока через volatile-копию
-    @Volatile
-    private var currentRotationMatrix = FloatArray(16).also { Matrix.setIdentityM(it, 0) }
-
-    // Текущий поворот экрана, обновляется из главного потока
-    @Volatile
-    private var currentDisplayRotation: Int = Surface.ROTATION_0
-
-    private val alpha = 0.05f  // Уменьшен для более плавного движения
+    private val alpha = 0.28f
 
     private val starList = mutableListOf<Star>()
     private val namedStarList = mutableListOf<NamedStar>()
@@ -85,7 +73,8 @@ class MainActivity : ComponentActivity(), SensorEventListener {
 
     val screenLabels = mutableStateListOf<ScreenLabel>()
 
-    private val mainHandler = Handler(Looper.getMainLooper())
+    private var sunPosition = FloatArray(3)
+    private var moonPosition = FloatArray(3)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -93,6 +82,7 @@ class MainActivity : ComponentActivity(), SensorEventListener {
 
         loadStarsFromAssets()
         defineConstellations()
+        updateSunMoonPosition()
         setContent { StarMapScreen() }
     }
 
@@ -135,18 +125,18 @@ class MainActivity : ComponentActivity(), SensorEventListener {
 
     private fun addImportantNamedStars() {
         val important = listOf(
-            "Сириус"     to Triple(6.7525f,  -16.7161f, -1.46f),
-            "Вега"       to Triple(18.6167f,  38.7833f,  0.03f),
-            "Арктур"     to Triple(14.2610f,  19.1822f, -0.05f),
-            "Капелла"    to Triple(5.2783f,   45.9981f,  0.08f),
-            "Ригель"     to Triple(5.2422f,   -8.2017f,  0.13f),
-            "Бетельгейзе" to Triple(5.9194f,   7.4072f,  0.50f),
-            "Альдебаран" to Triple(4.5986f,   16.5092f,  0.85f),
-            "Антарес"    to Triple(16.4903f, -26.4319f,  1.06f),
-            "Спика"      to Triple(13.4197f, -11.1614f,  0.98f),
-            "Денеб"      to Triple(20.6906f,  45.2803f,  1.25f),
-            "Альтаир"    to Triple(19.7933f,   8.8683f,  0.77f),
-            "Процион"    to Triple(7.6553f,    5.2250f,  0.34f)
+            "Сириус" to Triple(6.7525f, -16.7161f, -1.46f),
+            "Вега" to Triple(18.6167f, 38.7833f, 0.03f),
+            "Арктур" to Triple(14.2610f, 19.1822f, -0.05f),
+            "Капелла" to Triple(5.2783f, 45.9981f, 0.08f),
+            "Ригель" to Triple(5.2422f, -8.2017f, 0.13f),
+            "Бетельгейзе" to Triple(5.9194f, 7.4072f, 0.50f),
+            "Альдебаран" to Triple(4.5986f, 16.5092f, 0.85f),
+            "Антарес" to Triple(16.4903f, -26.4319f, 1.06f),
+            "Спика" to Triple(13.4197f, -11.1614f, 0.98f),
+            "Денеб" to Triple(20.6906f, 45.2803f, 1.25f),
+            "Альтаир" to Triple(19.7933f, 8.8683f, 0.77f),
+            "Процион" to Triple(7.6553f, 5.2250f, 0.34f)
         )
 
         important.forEach { (name, data) ->
@@ -167,12 +157,7 @@ class MainActivity : ComponentActivity(), SensorEventListener {
             val theta = Math.random().toFloat() * 2f * PI.toFloat()
             val phi = acos((2 * Math.random().toFloat() - 1)).toFloat()
             val r = 9f
-            starList.add(Star(
-                r * sin(phi) * cos(theta),
-                r * sin(phi) * sin(theta),
-                r * cos(phi),
-                5f
-            ))
+            starList.add(Star(r * sin(phi) * cos(theta), r * sin(phi) * sin(theta), r * cos(phi), 5f))
         }
     }
 
@@ -197,7 +182,6 @@ class MainActivity : ComponentActivity(), SensorEventListener {
                 val x1 = cos(decRad1) * cos(raRad1) * 9.8f
                 val y1 = cos(decRad1) * sin(raRad1) * 9.8f
                 val z1 = sin(decRad1) * 9.8f
-
                 val x2 = cos(decRad2) * cos(raRad2) * 9.8f
                 val y2 = cos(decRad2) * sin(raRad2) * 9.8f
                 val z2 = sin(decRad2) * 9.8f
@@ -209,18 +193,12 @@ class MainActivity : ComponentActivity(), SensorEventListener {
                 val (ra, dec) = labelRaDec
                 val raRad = ra * 15f * (PI.toFloat() / 180f)
                 val decRad = dec * (PI.toFloat() / 180f)
-                NamedStar(
-                    name,
-                    cos(decRad) * cos(raRad) * 9.8f,
-                    cos(decRad) * sin(raRad) * 9.8f,
-                    sin(decRad) * 9.8f
-                )
+                NamedStar(name, cos(decRad)*cos(raRad)*9.8f, cos(decRad)*sin(raRad)*9.8f, sin(decRad)*9.8f)
             } else null
 
             constellations.add(Constellation(name, constLines, labelStar))
         }
 
-        // Большая Медведица
         addConstellation("Большая Медведица", listOf(
             11.03f to 61.75f to (11.03f to 56.38f),
             11.03f to 56.38f to (12.26f to 57.03f),
@@ -230,13 +208,11 @@ class MainActivity : ComponentActivity(), SensorEventListener {
             13.40f to 54.93f to (13.79f to 49.31f)
         ), 11.0f to 55.0f)
 
-        // Малая Медведица
         addConstellation("Малая Медведица", listOf(
             2.53f to 89.26f to (14.85f to 74.16f),
             14.85f to 74.16f to (16.76f to 77.79f)
         ), 2.53f to 89.0f)
 
-        // Кассиопея
         addConstellation("Кассиопея", listOf(
             0.675f to 56.54f to (1.977f to 63.67f),
             1.977f to 63.67f to (3.792f to 63.67f),
@@ -244,22 +220,46 @@ class MainActivity : ComponentActivity(), SensorEventListener {
             5.433f to 60.72f to (0.675f to 56.54f)
         ), 1.5f to 61.0f)
 
-        // Лебедь
         addConstellation("Лебедь", listOf(
             20.69f to 45.28f to (19.85f to 40.68f),
             19.85f to 40.68f to (20.37f to 36.39f),
             20.69f to 45.28f to (19.51f to 27.96f)
         ), 20.69f to 45.0f)
 
-        // Орион
         addConstellation("Орион", listOf(
             5.92f to 7.41f to (5.24f to -8.20f),
             5.60f to -1.20f to (5.24f to -8.20f),
             5.60f to -1.20f to (5.92f to 7.41f),
             5.42f to -0.30f to (5.60f to -1.20f)
         ), 5.6f to 0.0f)
+    }
 
-        Log.d("StarMap", "Загружено ${constellations.size} созвездий")
+    private fun updateSunMoonPosition() {
+        val cal = Calendar.getInstance()
+        val hour = cal.get(Calendar.HOUR_OF_DAY)
+        val minute = cal.get(Calendar.MINUTE)
+        val dayOfYear = cal.get(Calendar.DAY_OF_YEAR)
+
+        val sunDec = 23.5f * sin(2 * PI.toFloat() * (dayOfYear - 81) / 365f)
+        val sunRa = (hour + minute / 60f) * 15f - 180f
+
+        val sunRaRad = sunRa * (PI.toFloat() / 180f)
+        val sunDecRad = sunDec * (PI.toFloat() / 180f)
+
+        sunPosition[0] = cos(sunDecRad) * cos(sunRaRad) * 9.8f
+        sunPosition[1] = cos(sunDecRad) * sin(sunRaRad) * 9.8f
+        sunPosition[2] = sin(sunDecRad) * 9.8f
+
+        val moonPhase = (dayOfYear % 29.5f) / 29.5f
+        val moonRa = sunRa + 180f + moonPhase * 360f
+        val moonDec = sunDec * 0.7f
+
+        val moonRaRad = moonRa * (PI.toFloat() / 180f)
+        val moonDecRad = moonDec * (PI.toFloat() / 180f)
+
+        moonPosition[0] = cos(moonDecRad) * cos(moonRaRad) * 9.8f
+        moonPosition[1] = cos(moonDecRad) * sin(moonRaRad) * 9.8f
+        moonPosition[2] = sin(moonDecRad) * 9.8f
     }
 
     @Composable
@@ -281,23 +281,14 @@ class MainActivity : ComponentActivity(), SensorEventListener {
             screenLabels.forEach { label ->
                 Text(
                     text = label.name,
-                    color = if (label.name.contains("Медведица") || label.name.contains("Кассиопея") ||
-                        label.name.contains("Лебедь") || label.name.contains("Орион"))
-                        Color.Yellow else Color.White,
-                    fontSize = if (label.name.length > 10) 11.sp else 13.sp,
+                    color = label.color,
+                    fontSize = 13.sp,
                     fontWeight = FontWeight.Bold,
                     modifier = Modifier
                         .offset(x = label.screenX.dp, y = label.screenY.dp)
                         .padding(4.dp)
                 )
             }
-            // Отладочный оверлей
-            Text(
-                text = debugInfo.value,
-                color = Color.Green,
-                fontSize = 10.sp,
-                modifier = Modifier.padding(4.dp)
-            )
         }
     }
 
@@ -305,46 +296,44 @@ class MainActivity : ComponentActivity(), SensorEventListener {
         private lateinit var starPositionBuffer: FloatBuffer
         private lateinit var starSizeBuffer: FloatBuffer
         private lateinit var constellationBuffer: FloatBuffer
+        private lateinit var horizonBuffer: FloatBuffer
 
         private val projectionMatrix = FloatArray(16)
         private val viewMatrix = FloatArray(16)
-        private val mvpMatrix = FloatArray(16)
-
-        // Локальные буферы для работы только внутри GL-потока
-        private val rotMatrix = FloatArray(16)
-        private val remappedMatrix = FloatArray(16)
-        private val invertedMatrix = FloatArray(16)
+        private val mvpMatrixForProjection = FloatArray(16)
 
         private var starProgram: Int = 0
+        private var axesProgram: Int = 0
         private var lineProgram: Int = 0
+        private var horizonProgram: Int = 0
 
         private var positionHandle = 0
         private var sizeHandle = 0
         private var mvpHandle = 0
 
+        private lateinit var axesBuffer: FloatBuffer
+        private lateinit var axesColorBuffer: FloatBuffer
+        private lateinit var sensorAxesBuffer: FloatBuffer
+        private lateinit var sensorAxesColorBuffer: FloatBuffer
+
         private var width = 0
         private var height = 0
+        private val mainHandler = Handler(Looper.getMainLooper())
 
         override fun onSurfaceCreated(gl: GL10?, config: EGLConfig?) {
             GLES20.glClearColor(0.005f, 0.005f, 0.025f, 1.0f)
             prepareStarBuffers()
             prepareConstellationBuffer()
+            prepareHorizonBuffer()
 
             starProgram = createProgram(starVertexShaderCode, starFragmentShaderCode)
+            axesProgram = createProgram(axesVertexShaderCode, axesFragmentShaderCode)
             lineProgram = createProgram(lineVertexShaderCode, lineFragmentShaderCode)
+            horizonProgram = createProgram(lineVertexShaderCode, horizonFragmentShaderCode)
 
             positionHandle = GLES20.glGetAttribLocation(starProgram, "aPosition")
             sizeHandle = GLES20.glGetAttribLocation(starProgram, "aSize")
             mvpHandle = GLES20.glGetUniformLocation(starProgram, "uMVPMatrix")
-
-            // Камера смотрит из начала координат вперёд по +Z
-            // Звёздная сфера вокруг наблюдателя
-            // В onSurfaceCreated:
-            Matrix.setLookAtM(viewMatrix, 0,
-                0f, 0f, 0f,   // позиция
-                0f, 1f, 0f,   // смотрим по +Y  ← было 0,0,1
-                0f, 0f, 1f    // "вверх" = +Z   ← было 0,1,0
-            )
         }
 
         private fun prepareStarBuffers() {
@@ -352,7 +341,7 @@ class MainActivity : ComponentActivity(), SensorEventListener {
             val sizes = FloatArray(starList.size)
 
             starList.forEachIndexed { i, star ->
-                positions[i * 3]     = star.x
+                positions[i * 3] = star.x
                 positions[i * 3 + 1] = star.y
                 positions[i * 3 + 2] = star.z
                 sizes[i] = star.size
@@ -360,6 +349,11 @@ class MainActivity : ComponentActivity(), SensorEventListener {
 
             starPositionBuffer = createFloatBuffer(positions)
             starSizeBuffer = createFloatBuffer(sizes)
+
+            axesBuffer = createFloatBuffer(floatArrayOf(0f,0f,0f,1.3f,0f,0f, 0f,0f,0f,0f,1.3f,0f, 0f,0f,0f,0f,0f,1.3f))
+            axesColorBuffer = createFloatBuffer(floatArrayOf(1f,0f,0f,1f,1f,0f,0f,1f, 0f,1f,0f,1f,0f,1f,0f,1f, 0f,0f,1f,1f,0f,0f,1f,1f))
+            sensorAxesBuffer = createFloatBuffer(floatArrayOf(0f,0f,0f,-1f,0f,0f, 0f,0f,0f,0f,-1f,0f, 0f,0f,0f,0f,0f,-1f))
+            sensorAxesColorBuffer = createFloatBuffer(floatArrayOf(1f,0f,1f,1f,1f,0f,1f,1f, 0f,1f,1f,1f,0f,1f,1f,1f, 1f,1f,0f,1f,1f,1f,0f,1f))
         }
 
         private fun prepareConstellationBuffer() {
@@ -373,80 +367,105 @@ class MainActivity : ComponentActivity(), SensorEventListener {
             constellationBuffer = createFloatBuffer(vertices.toFloatArray())
         }
 
+        private fun prepareHorizonBuffer() {
+            val vertices = mutableListOf<Float>()
+            val segments = 72
+            for (i in 0..segments) {
+                val angle = 2 * PI.toFloat() * i / segments
+                val x = cos(angle) * 12f
+                val z = sin(angle) * 12f
+                vertices.add(x); vertices.add(0f); vertices.add(z)
+            }
+            horizonBuffer = createFloatBuffer(vertices.toFloatArray())
+        }
+
         override fun onDrawFrame(gl: GL10?) {
             GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT)
 
-            val displayRotation = currentDisplayRotation
+            updateOrientation()
+            updateSunMoonPosition()
 
-            val accCopy: FloatArray
-            val magCopy: FloatArray
-            synchronized(this@MainActivity) {
-                accCopy = smoothedAccelerometer.clone()
-                magCopy = smoothedMagnetometer.clone()
+            Matrix.multiplyMM(mvpMatrixForProjection, 0, projectionMatrix, 0, viewMatrix, 0)
+            Matrix.multiplyMM(mvpMatrixForProjection, 0, mvpMatrixForProjection, 0, invertedRotationMatrix, 0)
+
+            drawStars(mvpMatrixForProjection)
+            drawConstellations(mvpMatrixForProjection)
+            drawHorizon(mvpMatrixForProjection)
+            drawSunAndMoon(mvpMatrixForProjection)
+
+            drawAxes(mvpMatrixForProjection, axesBuffer, axesColorBuffer, 5f)
+
+            val sensorMvp = FloatArray(16).apply {
+                Matrix.multiplyMM(this, 0, projectionMatrix, 0, viewMatrix, 0)
+                Matrix.multiplyMM(this, 0, this, 0, invertedRotationMatrix, 0)
             }
+            drawAxes(sensorMvp, sensorAxesBuffer, sensorAxesColorBuffer, 3f)
 
-            val success = SensorManager.getRotationMatrix(rotMatrix, null, accCopy, magCopy)
-            if (!success) {
-                Matrix.setIdentityM(invertedMatrix, 0)
-            } else {
-                // SensorManager даёт матрицу, где строки = оси устройства в мировой (ENU) системе.
-                // Нам нужно: направление "куда смотрит экран" → это -Z устройства в мировых координатах.
-                //
-                // Для SkyMap правильный remapping:
-                //   PORTRAIT (ROTATION_0):
-                //     Устройство держат вертикально. Нормаль экрана = -Z устройства.
-                //     Хотим: новый X = X устройства (горизонталь экрана = восток)
-                //             новый Y = Z устройства (вертикаль экрана = зенит)
-                //     → AXIS_X, AXIS_Z
-                //
-                //   LANDSCAPE RIGHT (ROTATION_90):
-                //     Устройство повёрнуто на 90° вправо.
-                //     → AXIS_Y, AXIS_MINUS_X  (стандартный remapping для landscape)
-                //     Но нормаль экрана всё ещё -Z, поэтому добавляем Z:
-                //     → AXIS_MINUS_Y, AXIS_Z
-                //
-                //   PORTRAIT FLIPPED (ROTATION_180):
-                //     → AXIS_MINUS_X, AXIS_Z
-                //
-                //   LANDSCAPE LEFT (ROTATION_270):
-                //     → AXIS_Y, AXIS_Z
-
-                val remapSuccess = when (displayRotation) {
-                    Surface.ROTATION_0   -> SensorManager.remapCoordinateSystem(rotMatrix, SensorManager.AXIS_X,       SensorManager.AXIS_Z,  remappedMatrix)
-                    Surface.ROTATION_90  -> SensorManager.remapCoordinateSystem(rotMatrix, SensorManager.AXIS_MINUS_Y, SensorManager.AXIS_Z,  remappedMatrix)
-                    Surface.ROTATION_180 -> SensorManager.remapCoordinateSystem(rotMatrix, SensorManager.AXIS_MINUS_X, SensorManager.AXIS_Z,  remappedMatrix)
-                    Surface.ROTATION_270 -> SensorManager.remapCoordinateSystem(rotMatrix, SensorManager.AXIS_Y,       SensorManager.AXIS_Z,  remappedMatrix)
-                    else                 -> SensorManager.remapCoordinateSystem(rotMatrix, SensorManager.AXIS_X,       SensorManager.AXIS_Z,  remappedMatrix)
-                }
-
-                if (!remapSuccess) {
-                    Matrix.setIdentityM(invertedMatrix, 0)
-                } else {
-                    // Транспонируем (= инвертируем для матрицы вращения).
-                    // remappedMatrix переводит вектор из системы устройства в мировую.
-                    // Нам нужна обратная: из мировой в систему устройства — это и есть транспонирование.
-                    // Транспонируем
-                    invertedMatrix[ 0] = remappedMatrix[ 0]; invertedMatrix[ 1] = remappedMatrix[ 4]; invertedMatrix[ 2] = remappedMatrix[ 8]; invertedMatrix[ 3] = 0f
-                    invertedMatrix[ 4] = remappedMatrix[ 1]; invertedMatrix[ 5] = remappedMatrix[ 5]; invertedMatrix[ 6] = remappedMatrix[ 9]; invertedMatrix[ 7] = 0f
-                    invertedMatrix[ 8] = remappedMatrix[ 2]; invertedMatrix[ 9] = remappedMatrix[ 6]; invertedMatrix[10] = remappedMatrix[10]; invertedMatrix[11] = 0f
-                    invertedMatrix[12] = 0f;                 invertedMatrix[13] = 0f;                 invertedMatrix[14] = 0f;                 invertedMatrix[15] = 1f
-
-                    invertedMatrix[1] = -invertedMatrix[1]; invertedMatrix[5] = -invertedMatrix[5]; invertedMatrix[9] = -invertedMatrix[9]
-                }
-            }
-
-            val vpMatrix = FloatArray(16)
-            Matrix.multiplyMM(vpMatrix, 0, projectionMatrix, 0, viewMatrix, 0)
-            Matrix.multiplyMM(mvpMatrix, 0, vpMatrix, 0, invertedMatrix, 0)
-
-            drawStars(mvpMatrix)
-            drawConstellations(mvpMatrix)
             updateScreenLabels()
         }
 
-        private fun drawStars(mvpMatrixArg: FloatArray) {
+        private fun drawSunAndMoon(mvp: FloatArray) {
+            drawSpecialPoint(mvp, sunPosition, 22f, Color(0xFFFFAA00)) // Солнце
+            drawSpecialPoint(mvp, moonPosition, 16f, Color.LightGray)   // Луна
+        }
+
+        private fun drawSpecialPoint(mvp: FloatArray, pos: FloatArray, size: Float, color: Color) {
             GLES20.glUseProgram(starProgram)
-            GLES20.glUniformMatrix4fv(mvpHandle, 1, false, mvpMatrixArg, 0)
+            GLES20.glUniformMatrix4fv(mvpHandle, 1, false, mvp, 0)
+
+            val tempPos = createFloatBuffer(pos)
+            val tempSize = createFloatBuffer(floatArrayOf(size))
+
+            val posHandle = GLES20.glGetAttribLocation(starProgram, "aPosition")
+            val sizeHandleTemp = GLES20.glGetAttribLocation(starProgram, "aSize")
+
+            GLES20.glEnableVertexAttribArray(posHandle)
+            GLES20.glEnableVertexAttribArray(sizeHandleTemp)
+
+            tempPos.position(0)
+            GLES20.glVertexAttribPointer(posHandle, 3, GLES20.GL_FLOAT, false, 0, tempPos)
+
+            tempSize.position(0)
+            GLES20.glVertexAttribPointer(sizeHandleTemp, 1, GLES20.GL_FLOAT, false, 0, tempSize)
+
+            GLES20.glDrawArrays(GLES20.GL_POINTS, 0, 1)
+
+            GLES20.glDisableVertexAttribArray(posHandle)
+            GLES20.glDisableVertexAttribArray(sizeHandleTemp)
+        }
+
+        private fun drawHorizon(mvp: FloatArray) {
+            GLES20.glUseProgram(horizonProgram)
+            GLES20.glUniformMatrix4fv(GLES20.glGetUniformLocation(horizonProgram, "uMVPMatrix"), 1, false, mvp, 0)
+
+            val posHandle = GLES20.glGetAttribLocation(horizonProgram, "aPosition")
+            GLES20.glEnableVertexAttribArray(posHandle)
+            horizonBuffer.position(0)
+            GLES20.glVertexAttribPointer(posHandle, 3, GLES20.GL_FLOAT, false, 0, horizonBuffer)
+
+            GLES20.glLineWidth(4f)
+            GLES20.glDrawArrays(GLES20.GL_LINE_STRIP, 0, 73)
+            GLES20.glDisableVertexAttribArray(posHandle)
+        }
+
+        private fun drawConstellations(mvp: FloatArray) {
+            if (constellations.isEmpty()) return
+            GLES20.glUseProgram(lineProgram)
+            GLES20.glUniformMatrix4fv(GLES20.glGetUniformLocation(lineProgram, "uMVPMatrix"), 1, false, mvp, 0)
+
+            val posHandle = GLES20.glGetAttribLocation(lineProgram, "aPosition")
+            GLES20.glEnableVertexAttribArray(posHandle)
+            constellationBuffer.position(0)
+            GLES20.glVertexAttribPointer(posHandle, 3, GLES20.GL_FLOAT, false, 0, constellationBuffer)
+
+            GLES20.glLineWidth(3f)
+            GLES20.glDrawArrays(GLES20.GL_LINES, 0, constellations.sumOf { it.lines.size } * 2)
+            GLES20.glDisableVertexAttribArray(posHandle)
+        }
+
+        private fun drawStars(mvpMatrix: FloatArray) {
+            GLES20.glUseProgram(starProgram)
+            GLES20.glUniformMatrix4fv(mvpHandle, 1, false, mvpMatrix, 0)
 
             GLES20.glEnableVertexAttribArray(positionHandle)
             GLES20.glEnableVertexAttribArray(sizeHandle)
@@ -457,36 +476,32 @@ class MainActivity : ComponentActivity(), SensorEventListener {
             starSizeBuffer.position(0)
             GLES20.glVertexAttribPointer(sizeHandle, 1, GLES20.GL_FLOAT, false, 4, starSizeBuffer)
 
-            GLES20.glEnable(GLES20.GL_BLEND)
-            GLES20.glBlendFunc(GLES20.GL_SRC_ALPHA, GLES20.GL_ONE_MINUS_SRC_ALPHA)
             GLES20.glDrawArrays(GLES20.GL_POINTS, 0, starList.size)
-            GLES20.glDisable(GLES20.GL_BLEND)
 
             GLES20.glDisableVertexAttribArray(positionHandle)
             GLES20.glDisableVertexAttribArray(sizeHandle)
         }
 
-        private fun drawConstellations(mvpMatrixArg: FloatArray) {
-            if (constellations.isEmpty()) return
+        private fun drawAxes(mvp: FloatArray, vertexBuffer: FloatBuffer, colorBuffer: FloatBuffer, lineWidth: Float) {
+            GLES20.glUseProgram(axesProgram)
+            GLES20.glUniformMatrix4fv(GLES20.glGetUniformLocation(axesProgram, "uMVPMatrix"), 1, false, mvp, 0)
 
-            GLES20.glUseProgram(lineProgram)
-            GLES20.glUniformMatrix4fv(
-                GLES20.glGetUniformLocation(lineProgram, "uMVPMatrix"),
-                1, false, mvpMatrixArg, 0
-            )
+            val pos = GLES20.glGetAttribLocation(axesProgram, "aPosition")
+            val col = GLES20.glGetAttribLocation(axesProgram, "aColor")
 
-            val posHandle = GLES20.glGetAttribLocation(lineProgram, "aPosition")
-            GLES20.glEnableVertexAttribArray(posHandle)
-            constellationBuffer.position(0)
-            GLES20.glVertexAttribPointer(posHandle, 3, GLES20.GL_FLOAT, false, 0, constellationBuffer)
+            GLES20.glEnableVertexAttribArray(pos)
+            GLES20.glEnableVertexAttribArray(col)
 
-            GLES20.glEnable(GLES20.GL_BLEND)
-            GLES20.glBlendFunc(GLES20.GL_SRC_ALPHA, GLES20.GL_ONE_MINUS_SRC_ALPHA)
-            GLES20.glLineWidth(2f)
-            GLES20.glDrawArrays(GLES20.GL_LINES, 0, constellations.sumOf { it.lines.size } * 2)
-            GLES20.glDisable(GLES20.GL_BLEND)
+            vertexBuffer.position(0)
+            GLES20.glVertexAttribPointer(pos, 3, GLES20.GL_FLOAT, false, 0, vertexBuffer)
+            colorBuffer.position(0)
+            GLES20.glVertexAttribPointer(col, 4, GLES20.GL_FLOAT, false, 0, colorBuffer)
 
-            GLES20.glDisableVertexAttribArray(posHandle)
+            GLES20.glLineWidth(lineWidth)
+            GLES20.glDrawArrays(GLES20.GL_LINES, 0, 6)
+
+            GLES20.glDisableVertexAttribArray(pos)
+            GLES20.glDisableVertexAttribArray(col)
         }
 
         override fun onSurfaceChanged(gl: GL10?, width: Int, height: Int) {
@@ -494,7 +509,8 @@ class MainActivity : ComponentActivity(), SensorEventListener {
             this.height = height
             GLES20.glViewport(0, 0, width, height)
             val ratio = width.toFloat() / height
-            Matrix.perspectiveM(projectionMatrix, 0, 70f, ratio, 0.1f, 100f)
+            Matrix.perspectiveM(projectionMatrix, 0, 55f, ratio, 0.1f, 100f)
+            Matrix.setLookAtM(viewMatrix, 0, 0f, 0f, -9.5f, 0f, 0f, 0f, 0f, 1f, 0f)
         }
 
         private fun createProgram(vertexCode: String, fragmentCode: String): Int {
@@ -516,49 +532,74 @@ class MainActivity : ComponentActivity(), SensorEventListener {
 
         private fun updateScreenLabels() {
             val tempLabels = mutableListOf<ScreenLabel>()
-            val w = width.toFloat()
-            val h = height.toFloat()
-
-            fun project(px: Float, py: Float, pz: Float, name: String, offsetY: Float) {
-                val objPos = floatArrayOf(px, py, pz, 1f)
-                val clip = FloatArray(4)
-                Matrix.multiplyMV(clip, 0, mvpMatrix, 0, objPos, 0)
-
-                // Отсекаем то, что за камерой
-                if (clip[3] <= 0f) return
-
-                val ndcX = clip[0] / clip[3]
-                val ndcY = clip[1] / clip[3]
-                val ndcZ = clip[2] / clip[3]
-
-                // Отсекаем то, что вне frustum
-                if (ndcX < -1f || ndcX > 1f || ndcY < -1f || ndcY > 1f || ndcZ < -1f || ndcZ > 1f) return
-
-                val screenX = (ndcX * 0.5f + 0.5f) * w
-                val screenY = (1.0f - (ndcY * 0.5f + 0.5f)) * h
-
-                // Переводим пиксели в dp для Compose offset
-                val density = resources.displayMetrics.density
-                val dpX = screenX / density
-                val dpY = (screenY + offsetY) / density
-
-                tempLabels.add(ScreenLabel(name, dpX, dpY))
-            }
+            val viewport = intArrayOf(0, 0, width, height)
 
             namedStarList.forEach { star ->
-                project(star.x, star.y, star.z, star.name, -20f)
+                val winPos = FloatArray(4)
+                val objPos = floatArrayOf(star.x, star.y, star.z, 1f)
+                Matrix.multiplyMV(winPos, 0, mvpMatrixForProjection, 0, objPos, 0)
+
+                if (winPos[3] > 0.1f) {
+                    val ndcX = winPos[0] / winPos[3]
+                    val ndcY = winPos[1] / winPos[3]
+                    val screenX = (ndcX * 0.5f + 0.5f) * viewport[2]
+                    val screenY = (1.0f - (ndcY * 0.5f + 0.5f)) * viewport[3]
+
+                    if (screenX in 0f..viewport[2].toFloat() && screenY in 0f..viewport[3].toFloat()) {
+                        tempLabels.add(ScreenLabel(star.name, screenX, screenY - 25f))
+                    }
+                }
             }
 
             constellations.forEach { const ->
-                const.labelStar?.let { ls ->
-                    project(ls.x, ls.y, ls.z, const.name, -35f)
+                const.labelStar?.let { labelStar ->
+                    val winPos = FloatArray(4)
+                    val objPos = floatArrayOf(labelStar.x, labelStar.y, labelStar.z, 1f)
+                    Matrix.multiplyMV(winPos, 0, mvpMatrixForProjection, 0, objPos, 0)
+
+                    if (winPos[3] > 0.1f) {
+                        val ndcX = winPos[0] / winPos[3]
+                        val ndcY = winPos[1] / winPos[3]
+                        val screenX = (ndcX * 0.5f + 0.5f) * viewport[2]
+                        val screenY = (1.0f - (ndcY * 0.5f + 0.5f)) * viewport[3]
+
+                        if (screenX in 0f..viewport[2].toFloat() && screenY in 0f..viewport[3].toFloat()) {
+                            tempLabels.add(ScreenLabel(const.name, screenX - 40f, screenY - 45f, Color.Yellow))
+                        }
+                    }
                 }
             }
+
+            tempLabels.add(ScreenLabel("☀ Солнце", calculateScreenX(sunPosition), calculateScreenY(sunPosition) - 30f, Color(0xFFFFAA00)))
+            tempLabels.add(ScreenLabel("☽ Луна", calculateScreenX(moonPosition), calculateScreenY(moonPosition) - 30f, Color.LightGray))
+
+            tempLabels.add(ScreenLabel("N", width/2f, 40f, Color.Cyan))
+            tempLabels.add(ScreenLabel("S", width/2f, height - 70f, Color.Cyan))
+            tempLabels.add(ScreenLabel("E", width - 70f, height/2f, Color.Cyan))
+            tempLabels.add(ScreenLabel("W", 40f, height/2f, Color.Cyan))
 
             mainHandler.post {
                 screenLabels.clear()
                 screenLabels.addAll(tempLabels)
             }
+        }
+
+        private fun calculateScreenX(pos: FloatArray): Float {
+            val winPos = FloatArray(4)
+            val objPos = floatArrayOf(pos[0], pos[1], pos[2], 1f)
+            Matrix.multiplyMV(winPos, 0, mvpMatrixForProjection, 0, objPos, 0)
+            if (winPos[3] <= 0.1f) return -100f
+            val ndcX = winPos[0] / winPos[3]
+            return (ndcX * 0.5f + 0.5f) * width
+        }
+
+        private fun calculateScreenY(pos: FloatArray): Float {
+            val winPos = FloatArray(4)
+            val objPos = floatArrayOf(pos[0], pos[1], pos[2], 1f)
+            Matrix.multiplyMV(winPos, 0, mvpMatrixForProjection, 0, objPos, 0)
+            if (winPos[3] <= 0.1f) return -100f
+            val ndcY = winPos[1] / winPos[3]
+            return (1.0f - (ndcY * 0.5f + 0.5f)) * height
         }
     }
 
@@ -568,75 +609,45 @@ class MainActivity : ComponentActivity(), SensorEventListener {
             .asFloatBuffer()
             .apply { put(data); position(0) }
 
-    // Вызывается из главного потока, безопасно обновляет поворот экрана
-    private fun updateDisplayRotation() {
-        @Suppress("DEPRECATION")
-        currentDisplayRotation = windowManager.defaultDisplay.rotation
+    private fun updateOrientation() {
+        if (!SensorManager.getRotationMatrix(rotationMatrix, null, smoothedAccelerometer, smoothedMagnetometer)) {
+            Matrix.setIdentityM(invertedRotationMatrix, 0)
+            return
+        }
+
+        val rot = windowManager.defaultDisplay.rotation
+        when (rot) {
+            Surface.ROTATION_0 -> SensorManager.remapCoordinateSystem(rotationMatrix, SensorManager.AXIS_X, SensorManager.AXIS_Y, remappedRotationMatrix)
+            Surface.ROTATION_90 -> SensorManager.remapCoordinateSystem(rotationMatrix, SensorManager.AXIS_Y, SensorManager.AXIS_MINUS_X, remappedRotationMatrix)
+            Surface.ROTATION_180 -> SensorManager.remapCoordinateSystem(rotationMatrix, SensorManager.AXIS_MINUS_X, SensorManager.AXIS_MINUS_Y, remappedRotationMatrix)
+            Surface.ROTATION_270 -> SensorManager.remapCoordinateSystem(rotationMatrix, SensorManager.AXIS_MINUS_Y, SensorManager.AXIS_X, remappedRotationMatrix)
+        }
+
+        Matrix.invertM(invertedRotationMatrix, 0, remappedRotationMatrix, 0)
     }
 
     override fun onSensorChanged(event: SensorEvent?) {
         event?.let {
             val values = it.values.clone()
-            synchronized(this) {
-                when (it.sensor.type) {
-                    Sensor.TYPE_ACCELEROMETER -> {
-                        if (!hasAccelerometer) {
-                            smoothedAccelerometer = values.clone()
-                            hasAccelerometer = true
-                        } else {
-                            for (i in values.indices)
-                                smoothedAccelerometer[i] = alpha * values[i] + (1 - alpha) * smoothedAccelerometer[i]
-                        }
+            when (it.sensor.type) {
+                Sensor.TYPE_ACCELEROMETER -> {
+                    for (i in values.indices) {
+                        smoothedAccelerometer[i] = alpha * values[i] + (1 - alpha) * smoothedAccelerometer[i]
                     }
-                    Sensor.TYPE_MAGNETIC_FIELD -> {
-                        if (!hasMagnetometer) {
-                            smoothedMagnetometer = values.clone()
-                            hasMagnetometer = true
-                        } else {
-                            for (i in values.indices)
-                                smoothedMagnetometer[i] = alpha * values[i] + (1 - alpha) * smoothedMagnetometer[i]
-                        }
+                }
+                Sensor.TYPE_MAGNETIC_FIELD -> {
+                    for (i in values.indices) {
+                        smoothedMagnetometer[i] = alpha * values[i] + (1 - alpha) * smoothedMagnetometer[i]
                     }
                 }
             }
-
-            // Обновляем отладку прямо здесь
-            val rot = FloatArray(16)
-            val acc = smoothedAccelerometer
-            val mag = smoothedMagnetometer
-            if (SensorManager.getRotationMatrix(rot, null, acc, mag)) {
-                val orientation = FloatArray(3)
-                SensorManager.getOrientation(rot, orientation)
-                val azimuth = Math.toDegrees(orientation[0].toDouble()).toInt()
-                val pitch   = Math.toDegrees(orientation[1].toDouble()).toInt()
-                val roll    = Math.toDegrees(orientation[2].toDouble()).toInt()
-
-                mainHandler.post {
-                    debugInfo.value = """
-                    |ACC:  x=${acc[0].fmt()} y=${acc[1].fmt()} z=${acc[2].fmt()}
-                    |MAG:  x=${mag[0].fmt()} y=${mag[1].fmt()} z=${mag[2].fmt()}
-                    |Azimuth(yaw):  $azimuth°
-                    |Pitch:         $pitch°
-                    |Roll:          $roll°
-                    |Display rot:   $currentDisplayRotation
-                    |ROT[0..2]: ${rot[0].fmt()} ${rot[1].fmt()} ${rot[2].fmt()}
-                    |ROT[4..6]: ${rot[4].fmt()} ${rot[5].fmt()} ${rot[6].fmt()}
-                    |ROT[8..10]:${rot[8].fmt()} ${rot[9].fmt()} ${rot[10].fmt()}
-                """.trimMargin()
-                }
-            }
-
-            mainHandler.post { updateDisplayRotation() }
         }
     }
-
-    fun Float.fmt() = "%.2f".format(this)
 
     override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) {}
 
     override fun onResume() {
         super.onResume()
-        updateDisplayRotation()
         sensorManager.getDefaultSensor(Sensor.TYPE_ACCELEROMETER)?.let {
             sensorManager.registerListener(this, it, SensorManager.SENSOR_DELAY_GAME)
         }
@@ -656,18 +667,33 @@ class MainActivity : ComponentActivity(), SensorEventListener {
         uniform mat4 uMVPMatrix;
         void main() {
             gl_Position = uMVPMatrix * aPosition;
-            gl_PointSize = aSize / gl_Position.w * 10.0;
+            gl_PointSize = aSize;
         }
     """.trimIndent()
 
     private val starFragmentShaderCode = """
         precision mediump float;
         void main() {
-            vec2 coord = gl_PointCoord - vec2(0.5);
-            float r = dot(coord, coord);
-            if (r > 0.25) discard;
-            float alpha = 1.0 - smoothstep(0.15, 0.25, r);
-            gl_FragColor = vec4(1.0, 1.0, 0.95, alpha);
+            gl_FragColor = vec4(1.0, 1.0, 0.95, 1.0);
+        }
+    """.trimIndent()
+
+    private val axesVertexShaderCode = """
+        attribute vec4 aPosition;
+        attribute vec4 aColor;
+        uniform mat4 uMVPMatrix;
+        varying vec4 vColor;
+        void main() {
+            gl_Position = uMVPMatrix * aPosition;
+            vColor = aColor;
+        }
+    """.trimIndent()
+
+    private val axesFragmentShaderCode = """
+        precision mediump float;
+        varying vec4 vColor;
+        void main() {
+            gl_FragColor = vColor;
         }
     """.trimIndent()
 
@@ -682,7 +708,14 @@ class MainActivity : ComponentActivity(), SensorEventListener {
     private val lineFragmentShaderCode = """
         precision mediump float;
         void main() {
-            gl_FragColor = vec4(0.4, 0.6, 1.0, 0.6);
+            gl_FragColor = vec4(0.6, 0.85, 1.0, 0.9);
+        }
+    """.trimIndent()
+
+    private val horizonFragmentShaderCode = """
+        precision mediump float;
+        void main() {
+            gl_FragColor = vec4(0.4, 0.4, 0.4, 0.6);
         }
     """.trimIndent()
 }
