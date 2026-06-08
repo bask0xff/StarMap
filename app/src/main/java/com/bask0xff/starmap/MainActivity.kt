@@ -65,7 +65,7 @@ class MainActivity : ComponentActivity(), SensorEventListener {
     private var remappedRotationMatrix = FloatArray(16)
     private var invertedRotationMatrix = FloatArray(16)
 
-    private val alpha = 0.20f
+    private val alpha = 0.22f
 
     private val starList = mutableListOf<Star>()
     private val namedStarList = mutableListOf<NamedStar>()
@@ -85,6 +85,7 @@ class MainActivity : ComponentActivity(), SensorEventListener {
         setContent { StarMapScreen() }
     }
 
+    // ==================== ЗАГРУЗКА ДАННЫХ ====================
     private fun loadStarsFromAssets() {
         try {
             val inputStream = assets.open("stars_bright.csv")
@@ -163,11 +164,7 @@ class MainActivity : ComponentActivity(), SensorEventListener {
     private fun defineConstellations() {
         constellations.clear()
 
-        fun addConstellation(
-            name: String,
-            lines: List<Pair<Pair<Float, Float>, Pair<Float, Float>>>,
-            labelRaDec: Pair<Float, Float>? = null
-        ) {
+        fun addConstellation(name: String, lines: List<Pair<Pair<Float, Float>, Pair<Float, Float>>>, labelRaDec: Pair<Float, Float>? = null) {
             val constLines = mutableListOf<ConstellationLine>()
             lines.forEach { (p1, p2) ->
                 val (ra1, dec1) = p1
@@ -403,7 +400,7 @@ class MainActivity : ComponentActivity(), SensorEventListener {
         }
 
         private fun drawSunAndMoon(mvp: FloatArray) {
-            drawSpecialPoint(mvp, sunPosition, 45f, Color(0xFFFFFF00)) // Очень большое Солнце
+            drawSpecialPoint(mvp, sunPosition, 45f, Color(0xFFFFFF00))
             drawSpecialPoint(mvp, moonPosition, 32f, Color(0xFFEEEEFF))
         }
 
@@ -441,7 +438,7 @@ class MainActivity : ComponentActivity(), SensorEventListener {
             horizonBuffer.position(0)
             GLES20.glVertexAttribPointer(posHandle, 3, GLES20.GL_FLOAT, false, 0, horizonBuffer)
 
-            GLES20.glLineWidth(6f)
+            GLES20.glLineWidth(5f)
             GLES20.glDrawArrays(GLES20.GL_LINE_STRIP, 0, 73)
             GLES20.glDisableVertexAttribArray(posHandle)
         }
@@ -532,7 +529,6 @@ class MainActivity : ComponentActivity(), SensorEventListener {
             val tempLabels = mutableListOf<ScreenLabel>()
             val viewport = intArrayOf(0, 0, width, height)
 
-            // Звёзды и созвездия (упрощённо)
             namedStarList.forEach { star ->
                 val winPos = FloatArray(4)
                 val objPos = floatArrayOf(star.x, star.y, star.z, 1f)
@@ -611,20 +607,51 @@ class MainActivity : ComponentActivity(), SensorEventListener {
     private fun updateOrientation() {
         if (!SensorManager.getRotationMatrix(rotationMatrix, null, smoothedAccelerometer, smoothedMagnetometer)) {
             Matrix.setIdentityM(invertedRotationMatrix, 0)
+            Log.w("StarMap", "Не удалось получить rotationMatrix")
             return
         }
 
         val rot = windowManager.defaultDisplay.rotation
 
+        Log.d("StarMap", "=== ОРИЕНТАЦИЯ === Rotation = $rot (${getRotationName(rot)})")
+
         when (rot) {
-            Surface.ROTATION_0 -> SensorManager.remapCoordinateSystem(rotationMatrix, SensorManager.AXIS_X, SensorManager.AXIS_Y, remappedRotationMatrix)
-            Surface.ROTATION_90 -> SensorManager.remapCoordinateSystem(rotationMatrix, SensorManager.AXIS_Y, SensorManager.AXIS_MINUS_X, remappedRotationMatrix)
-            Surface.ROTATION_180 -> SensorManager.remapCoordinateSystem(rotationMatrix, SensorManager.AXIS_MINUS_X, SensorManager.AXIS_MINUS_Y, remappedRotationMatrix)
-            Surface.ROTATION_270 -> SensorManager.remapCoordinateSystem(rotationMatrix, SensorManager.AXIS_MINUS_Y, SensorManager.AXIS_X, remappedRotationMatrix)
+            Surface.ROTATION_0 -> {
+                SensorManager.remapCoordinateSystem(rotationMatrix, SensorManager.AXIS_X, SensorManager.AXIS_Y, remappedRotationMatrix)
+                Log.d("StarMap", "Portrait normal → AXIS_X → AXIS_Y")
+            }
+            Surface.ROTATION_90 -> {
+                SensorManager.remapCoordinateSystem(rotationMatrix, SensorManager.AXIS_Y, SensorManager.AXIS_MINUS_X, remappedRotationMatrix)
+                Log.d("StarMap", "Landscape left → AXIS_Y → AXIS_MINUS_X")
+            }
+            Surface.ROTATION_180 -> {
+                SensorManager.remapCoordinateSystem(rotationMatrix, SensorManager.AXIS_MINUS_X, SensorManager.AXIS_MINUS_Y, remappedRotationMatrix)
+                Log.d("StarMap", "Portrait upside down → AXIS_MINUS_X → AXIS_MINUS_Y")
+            }
+            Surface.ROTATION_270 -> {
+                SensorManager.remapCoordinateSystem(rotationMatrix, SensorManager.AXIS_MINUS_Y, SensorManager.AXIS_X, remappedRotationMatrix)
+                Log.d("StarMap", "Landscape right → AXIS_MINUS_Y → AXIS_X")
+            }
         }
 
-        // Инвертируем, чтобы небо двигалось правильно относительно устройства
         Matrix.invertM(invertedRotationMatrix, 0, remappedRotationMatrix, 0)
+
+        // Логируем углы
+        val angles = FloatArray(3)
+        SensorManager.getOrientation(remappedRotationMatrix, angles)
+        val yaw = Math.toDegrees(angles[0].toDouble()).toFloat()
+        val pitch = Math.toDegrees(angles[1].toDouble()).toFloat()
+        val roll = Math.toDegrees(angles[2].toDouble()).toFloat()
+
+        Log.d("StarMap", "Yaw=${yaw.toInt()}° Pitch=${pitch.toInt()}° Roll=${roll.toInt()}°")
+    }
+
+    private fun getRotationName(rot: Int): String = when (rot) {
+        Surface.ROTATION_0 -> "ROTATION_0 (Portrait)"
+        Surface.ROTATION_90 -> "ROTATION_90 (Landscape Left)"
+        Surface.ROTATION_180 -> "ROTATION_180 (Portrait Upside Down)"
+        Surface.ROTATION_270 -> "ROTATION_270 (Landscape Right)"
+        else -> "Unknown"
     }
 
     override fun onSensorChanged(event: SensorEvent?) {
