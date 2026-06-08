@@ -65,7 +65,7 @@ class MainActivity : ComponentActivity(), SensorEventListener {
     private var remappedRotationMatrix = FloatArray(16)
     private var invertedRotationMatrix = FloatArray(16)
 
-    private val alpha = 0.28f
+    private val alpha = 0.20f
 
     private val starList = mutableListOf<Star>()
     private val namedStarList = mutableListOf<NamedStar>()
@@ -82,7 +82,6 @@ class MainActivity : ComponentActivity(), SensorEventListener {
 
         loadStarsFromAssets()
         defineConstellations()
-        updateSunMoonPosition()
         setContent { StarMapScreen() }
     }
 
@@ -236,12 +235,11 @@ class MainActivity : ComponentActivity(), SensorEventListener {
 
     private fun updateSunMoonPosition() {
         val cal = Calendar.getInstance()
-        val hour = cal.get(Calendar.HOUR_OF_DAY)
-        val minute = cal.get(Calendar.MINUTE)
+        val hour = cal.get(Calendar.HOUR_OF_DAY) + cal.get(Calendar.MINUTE) / 60f
         val dayOfYear = cal.get(Calendar.DAY_OF_YEAR)
 
         val sunDec = 23.5f * sin(2 * PI.toFloat() * (dayOfYear - 81) / 365f)
-        val sunRa = (hour + minute / 60f) * 15f - 180f
+        val sunRa = (hour * 15f) - 180f
 
         val sunRaRad = sunRa * (PI.toFloat() / 180f)
         val sunDecRad = sunDec * (PI.toFloat() / 180f)
@@ -251,8 +249,8 @@ class MainActivity : ComponentActivity(), SensorEventListener {
         sunPosition[2] = sin(sunDecRad) * 9.8f
 
         val moonPhase = (dayOfYear % 29.5f) / 29.5f
-        val moonRa = sunRa + 180f + moonPhase * 360f
-        val moonDec = sunDec * 0.7f
+        val moonRa = sunRa + 90f + moonPhase * 360f
+        val moonDec = sunDec * 0.6f
 
         val moonRaRad = moonRa * (PI.toFloat() / 180f)
         val moonDecRad = moonDec * (PI.toFloat() / 180f)
@@ -405,8 +403,8 @@ class MainActivity : ComponentActivity(), SensorEventListener {
         }
 
         private fun drawSunAndMoon(mvp: FloatArray) {
-            drawSpecialPoint(mvp, sunPosition, 22f, Color(0xFFFFAA00)) // Солнце
-            drawSpecialPoint(mvp, moonPosition, 16f, Color.LightGray)   // Луна
+            drawSpecialPoint(mvp, sunPosition, 45f, Color(0xFFFFFF00)) // Очень большое Солнце
+            drawSpecialPoint(mvp, moonPosition, 32f, Color(0xFFEEEEFF))
         }
 
         private fun drawSpecialPoint(mvp: FloatArray, pos: FloatArray, size: Float, color: Color) {
@@ -416,22 +414,22 @@ class MainActivity : ComponentActivity(), SensorEventListener {
             val tempPos = createFloatBuffer(pos)
             val tempSize = createFloatBuffer(floatArrayOf(size))
 
-            val posHandle = GLES20.glGetAttribLocation(starProgram, "aPosition")
-            val sizeHandleTemp = GLES20.glGetAttribLocation(starProgram, "aSize")
+            val posH = GLES20.glGetAttribLocation(starProgram, "aPosition")
+            val sizeH = GLES20.glGetAttribLocation(starProgram, "aSize")
 
-            GLES20.glEnableVertexAttribArray(posHandle)
-            GLES20.glEnableVertexAttribArray(sizeHandleTemp)
+            GLES20.glEnableVertexAttribArray(posH)
+            GLES20.glEnableVertexAttribArray(sizeH)
 
             tempPos.position(0)
-            GLES20.glVertexAttribPointer(posHandle, 3, GLES20.GL_FLOAT, false, 0, tempPos)
+            GLES20.glVertexAttribPointer(posH, 3, GLES20.GL_FLOAT, false, 0, tempPos)
 
             tempSize.position(0)
-            GLES20.glVertexAttribPointer(sizeHandleTemp, 1, GLES20.GL_FLOAT, false, 0, tempSize)
+            GLES20.glVertexAttribPointer(sizeH, 1, GLES20.GL_FLOAT, false, 0, tempSize)
 
             GLES20.glDrawArrays(GLES20.GL_POINTS, 0, 1)
 
-            GLES20.glDisableVertexAttribArray(posHandle)
-            GLES20.glDisableVertexAttribArray(sizeHandleTemp)
+            GLES20.glDisableVertexAttribArray(posH)
+            GLES20.glDisableVertexAttribArray(sizeH)
         }
 
         private fun drawHorizon(mvp: FloatArray) {
@@ -443,7 +441,7 @@ class MainActivity : ComponentActivity(), SensorEventListener {
             horizonBuffer.position(0)
             GLES20.glVertexAttribPointer(posHandle, 3, GLES20.GL_FLOAT, false, 0, horizonBuffer)
 
-            GLES20.glLineWidth(4f)
+            GLES20.glLineWidth(6f)
             GLES20.glDrawArrays(GLES20.GL_LINE_STRIP, 0, 73)
             GLES20.glDisableVertexAttribArray(posHandle)
         }
@@ -534,6 +532,7 @@ class MainActivity : ComponentActivity(), SensorEventListener {
             val tempLabels = mutableListOf<ScreenLabel>()
             val viewport = intArrayOf(0, 0, width, height)
 
+            // Звёзды и созвездия (упрощённо)
             namedStarList.forEach { star ->
                 val winPos = FloatArray(4)
                 val objPos = floatArrayOf(star.x, star.y, star.z, 1f)
@@ -570,12 +569,12 @@ class MainActivity : ComponentActivity(), SensorEventListener {
                 }
             }
 
-            tempLabels.add(ScreenLabel("☀ Солнце", calculateScreenX(sunPosition), calculateScreenY(sunPosition) - 30f, Color(0xFFFFAA00)))
-            tempLabels.add(ScreenLabel("☽ Луна", calculateScreenX(moonPosition), calculateScreenY(moonPosition) - 30f, Color.LightGray))
+            tempLabels.add(ScreenLabel("☀ СОЛНЦЕ", calculateScreenX(sunPosition), calculateScreenY(sunPosition) - 45f, Color(0xFFFFFF00)))
+            tempLabels.add(ScreenLabel("☽ ЛУНА", calculateScreenX(moonPosition), calculateScreenY(moonPosition) - 40f, Color.LightGray))
 
             tempLabels.add(ScreenLabel("N", width/2f, 40f, Color.Cyan))
-            tempLabels.add(ScreenLabel("S", width/2f, height - 70f, Color.Cyan))
-            tempLabels.add(ScreenLabel("E", width - 70f, height/2f, Color.Cyan))
+            tempLabels.add(ScreenLabel("S", width/2f, height - 80f, Color.Cyan))
+            tempLabels.add(ScreenLabel("E", width - 80f, height/2f, Color.Cyan))
             tempLabels.add(ScreenLabel("W", 40f, height/2f, Color.Cyan))
 
             mainHandler.post {
@@ -616,6 +615,7 @@ class MainActivity : ComponentActivity(), SensorEventListener {
         }
 
         val rot = windowManager.defaultDisplay.rotation
+
         when (rot) {
             Surface.ROTATION_0 -> SensorManager.remapCoordinateSystem(rotationMatrix, SensorManager.AXIS_X, SensorManager.AXIS_Y, remappedRotationMatrix)
             Surface.ROTATION_90 -> SensorManager.remapCoordinateSystem(rotationMatrix, SensorManager.AXIS_Y, SensorManager.AXIS_MINUS_X, remappedRotationMatrix)
@@ -623,6 +623,7 @@ class MainActivity : ComponentActivity(), SensorEventListener {
             Surface.ROTATION_270 -> SensorManager.remapCoordinateSystem(rotationMatrix, SensorManager.AXIS_MINUS_Y, SensorManager.AXIS_X, remappedRotationMatrix)
         }
 
+        // Инвертируем, чтобы небо двигалось правильно относительно устройства
         Matrix.invertM(invertedRotationMatrix, 0, remappedRotationMatrix, 0)
     }
 
