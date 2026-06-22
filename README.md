@@ -10,8 +10,8 @@ The project is built as an isolated computing module capable of processing massi
 
 *   **Astronomical Engine**: Full calculation of celestial body movements (stars, Solar System planets, and the Moon) taking into account Earth's axial precession, nutation, and atmospheric refraction.
 *   **Sky Culture Layers**: Native support for various cultural interpretations of constellations (Western, Arabic, Egyptian, Chinese, etc.) by parsing external sky-culture configuration frameworks (such as Stellarium `.fab` file formats).
-*   **Dynamic Magnitude Filtering**: Dynamically filters and renders objects based on their apparent magnitude (Magnitude Limit)—from bright navigational stars to fainter Deep Sky Objects (DSOs).
 *   **Projection Rendering**: High-accuracy mathematical plotting of stereographic and orthographic projections of the celestial dome, centered precisely on the observer's zenith.
+*   **Dynamic Magnitude Filtering**: Dynamically filters and renders objects based on their apparent magnitude (Magnitude Limit)—from bright navigational stars to fainter Deep Sky Objects (DSOs).
 *   **Graphics Customization**: Granular control over visual mapping styles, including color palettes, font labeling, coordinate grids, and toggleable constellation boundaries or artwork lines.
 
 ---
